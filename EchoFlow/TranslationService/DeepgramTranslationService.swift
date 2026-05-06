@@ -9,10 +9,11 @@ import AVFoundation
 import Combine
 
 class DeepgramService: ObservableObject {
-    
+
     private var webSocketTask: URLSessionWebSocketTask?
-    private let apiKey = Secrets.deepgramAPIKey  // ← 从 Secrets 读取
-    
+    private var session: URLSession?          // 必须持有 session，否则 task 会被系统回收
+    private let apiKey = Secrets.deepgramAPIKey
+
     @Published var transcribedText: String = ""
     @Published var isConnected: Bool = false
     
@@ -34,36 +35,45 @@ class DeepgramService: ObservableObject {
         var request = URLRequest(url: url)
         request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
 
-        let session = URLSession(configuration: .default)
-        webSocketTask = session.webSocketTask(with: request)
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 300
+        config.timeoutIntervalForResource = 3600
+        session = URLSession(configuration: config)
+        webSocketTask = session?.webSocketTask(with: request)
         webSocketTask?.resume()
-        // isConnected 在收到第一条消息后才设为 true，避免握手失败时误判
+        // 立即允许发送音频，Deepgram 要求连接后马上收到数据否则会超时关闭
+        isConnected = true
         print("🔌 Deepgram WebSocket 正在连接（\(Int(sampleRate)) Hz）...")
         receiveMessage()
     }
     
     // MARK: - 发送音频数据
     func sendAudio(_ buffer: AVAudioPCMBuffer) {
-        guard isConnected,
-              let channelData = buffer.floatChannelData?[0] else { return }
-        
+        guard isConnected else {
+            // 诊断：每隔一段时间提示 isConnected 为 false
+            if Int.random(in: 0..<30) == 0 {
+                print("⏳ sendAudio 跳过：isConnected=false，等待握手...")
+            }
+            return
+        }
+        guard let channelData = buffer.floatChannelData?[0] else { return }
+
         let frameCount = Int(buffer.frameLength)
         var int16Samples = [Int16](repeating: 0, count: frameCount)
-        
-        // 计算 RMS 音量用于调试
+
+        let gain: Float = 3.0  // 软件增益，提升小声说话的识别率
         var sumSquares: Float = 0
         for i in 0..<frameCount {
-            let sample = max(-1.0, min(1.0, channelData[i]))
+            let sample = max(-1.0, min(1.0, channelData[i] * gain))
             int16Samples[i] = Int16(sample * 32767)
             sumSquares += sample * sample
         }
         let rms = sqrt(sumSquares / Float(frameCount))
-        
-        // 每 20 个 buffer 打印一次音量（避免刷屏）
+
         if Int.random(in: 0..<20) == 0 {
-            print("🎤 Deepgram 发送 | 帧数: \(frameCount) | RMS音量: \(String(format: "%.4f", rms))")
+            print("🎤 Deepgram 发送 | 帧数: \(frameCount) | RMS: \(String(format: "%.4f", rms))")
         }
-        
+
         let data = int16Samples.withUnsafeBytes { Data($0) }
         webSocketTask?.send(.data(data)) { error in
             if let error = error {
@@ -78,11 +88,6 @@ class DeepgramService: ObservableObject {
             guard let self else { return }
             switch result {
             case .success(let message):
-                // 收到第一条消息才确认连接成功
-                if !self.isConnected {
-                    DispatchQueue.main.async { self.isConnected = true }
-                    print("✅ Deepgram 连接已确认")
-                }
                 if case .string(let text) = message {
                     self.handleResponse(text)
                 }
@@ -99,15 +104,21 @@ class DeepgramService: ObservableObject {
     
     // MARK: - 解析返回 JSON
     private func handleResponse(_ text: String) {
+        print("📨 收到消息: \(text.prefix(200))")  // 诊断：打印原始 JSON
+
         guard let data = text.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let channel = json["channel"] as? [String: Any],
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            print("⚠️ JSON 解析失败")
+            return
+        }
+
+        guard let channel = json["channel"] as? [String: Any],
               let alternatives = channel["alternatives"] as? [[String: Any]],
               let transcript = alternatives.first?["transcript"] as? String,
               !transcript.isEmpty else { return }
-        
+
         let isFinal = json["is_final"] as? Bool ?? false
-        
+
         DispatchQueue.main.async {
             self.transcribedText = transcript
             print("\(isFinal ? "📝 最终" : "⏳ 中间") \(transcript)")
@@ -118,6 +129,8 @@ class DeepgramService: ObservableObject {
     func disconnect() {
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
+        session?.invalidateAndCancel()
+        session = nil
         DispatchQueue.main.async {
             self.isConnected = false
         }

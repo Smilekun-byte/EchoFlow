@@ -128,6 +128,7 @@ struct ContentView: View {
         }
         .padding()
         .onAppear {
+            print("🟢 VIEW APPEARED")
             appleTranscription.requestPermission { granted in
                 print(granted ? "✅ 语音识别权限已获取" : "❌ 权限被拒绝")
             }

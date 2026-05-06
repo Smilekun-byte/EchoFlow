@@ -5,7 +5,7 @@
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>需要语音识别将音频转为文字</string>
 	<key>DEEPGRAM_API_KEY</key>
-	<string>DEEPGRAM_API_KEY</string>
+	<string>$(DEEPGRAM_API_KEY)</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>需要麦克风录制音频</string>
 </dict>
