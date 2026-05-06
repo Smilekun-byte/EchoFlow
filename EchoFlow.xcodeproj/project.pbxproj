@@ -6,8 +6,18 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		0FA8D48D2F95077B00F0C1F0 /* AppleTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FA8D4832F94C2E900F0C1F0 /* AppleTranscriptionService.swift */; };
+		0FA8D49A2F9B93FD00F0C1F0 /* DeepgramService.swift  in Resources */ = {isa = PBXBuildFile; fileRef = 0FA8D4992F9B93E000F0C1F0 /* DeepgramService.swift  */; };
+		0FA8D49B2F9B986B00F0C1F0 /* Secrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FA8D4952F9B930500F0C1F0 /* Secrets.swift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
+		0FA8D4832F94C2E900F0C1F0 /* AppleTranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleTranscriptionService.swift; sourceTree = "<group>"; };
 		0FA8D4892F94C61100F0C1F0 /* EchoFlow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EchoFlow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0FA8D4932F9B909C00F0C1F0 /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		0FA8D4952F9B930500F0C1F0 /* Secrets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Secrets.swift; sourceTree = "<group>"; };
+		0FA8D4992F9B93E000F0C1F0 /* DeepgramService.swift  */ = {isa = PBXFileReference; lastKnownFileType = text; path = "DeepgramService.swift "; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -15,7 +25,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				TranscriptionService.swift,
 			);
 			target = 0FAEA0942F80ADFB00140854 /* EchoFlow */;
 		};
@@ -43,11 +52,31 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0FA8D4942F9B92E800F0C1F0 /*  Config */ = {
+			isa = PBXGroup;
+			children = (
+				0FA8D4952F9B930500F0C1F0 /* Secrets.swift */,
+				0FA8D4932F9B909C00F0C1F0 /* Config.xcconfig */,
+			);
+			path = " Config";
+			sourceTree = "<group>";
+		};
+		0FA8D4962F9B936C00F0C1F0 /* Transcription */ = {
+			isa = PBXGroup;
+			children = (
+				0FA8D4832F94C2E900F0C1F0 /* AppleTranscriptionService.swift */,
+				0FA8D4992F9B93E000F0C1F0 /* DeepgramService.swift  */,
+			);
+			path = Transcription;
+			sourceTree = "<group>";
+		};
 		0FAEA08C2F80ADFB00140854 = {
 			isa = PBXGroup;
 			children = (
 				0FAEA0972F80ADFB00140854 /* EchoFlow */,
 				0FA8D4892F94C61100F0C1F0 /* EchoFlow.app */,
+				0FA8D4942F9B92E800F0C1F0 /*  Config */,
+				0FA8D4962F9B936C00F0C1F0 /* Transcription */,
 			);
 			sourceTree = "<group>";
 		};
@@ -115,6 +144,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0FA8D49A2F9B93FD00F0C1F0 /* DeepgramService.swift  in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -125,6 +155,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0FA8D49B2F9B986B00F0C1F0 /* Secrets.swift in Sources */,
+				0FA8D48D2F95077B00F0C1F0 /* AppleTranscriptionService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -133,6 +165,7 @@
 /* Begin XCBuildConfiguration section */
 		0FAEA09E2F80ADFB00140854 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 0FA8D4932F9B909C00F0C1F0 /* Config.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -197,6 +230,7 @@
 		};
 		0FAEA09F2F80ADFB00140854 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 0FA8D4932F9B909C00F0C1F0 /* Config.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -254,6 +288,7 @@
 		};
 		0FAEA0A12F80ADFB00140854 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 0FA8D4932F9B909C00F0C1F0 /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -288,6 +323,7 @@
 		};
 		0FAEA0A22F80ADFB00140854 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 0FA8D4932F9B909C00F0C1F0 /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
