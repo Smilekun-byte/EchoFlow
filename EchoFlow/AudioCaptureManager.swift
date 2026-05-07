@@ -24,6 +24,11 @@ class AudioCaptureManager: ObservableObject {
     func startRecording() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+
+        // 请求用户偏好的采样率（iOS 可能不完全支持）
+        let preferredRate = Double(UserDefaults.standard.string(forKey: "sampleRate") ?? "16000") ?? 16000
+        try? session.setPreferredSampleRate(preferredRate)
+
         try session.setActive(true, options: .notifyOthersOnDeactivation)
 
         let inputNode = audioEngine.inputNode
@@ -33,6 +38,15 @@ class AudioCaptureManager: ObservableObject {
         print("🎙️ 采样率: \(format.sampleRate) Hz, 声道数: \(format.channelCount)")
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+            // 应用设置中的麦克风增益
+            let savedGain = UserDefaults.standard.double(forKey: "microphoneGain")
+            let gain = Float(savedGain < 1.0 ? 2.0 : savedGain)
+            if let channelData = buffer.floatChannelData?[0] {
+                let frames = Int(buffer.frameLength)
+                for i in 0..<frames {
+                    channelData[i] = max(-1.0, min(1.0, channelData[i] * gain))
+                }
+            }
             self?.appendBuffer(buffer)
             self?.onBufferReady?(buffer)
         }

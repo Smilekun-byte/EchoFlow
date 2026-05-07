@@ -24,6 +24,12 @@ struct ContentView: View {
     @State private var waves: [WaveRing] = []
     @State private var waveTimer: Timer?
 
+    @AppStorage("defaultEngine")      private var defaultEngine      = "deepgram"
+    @AppStorage("autoSaveRecords")    private var autoSaveRecords    = true
+    @AppStorage("autoGenerateTitle")  private var autoGenerateTitle  = true
+    @AppStorage("autoTranslate")      private var autoTranslate      = true
+    @AppStorage("translationEngine")  private var translationEngine  = "apple"
+
     @Namespace private var engineNS
     @Environment(\.colorScheme) private var colorScheme
 
@@ -75,6 +81,7 @@ struct ContentView: View {
             translationSession = session
         }
         .onAppear {
+            useDeepgram = defaultEngine == "deepgram"
             appleTranscription.requestPermission { granted in
                 print(granted ? "✅ 语音识别权限已获取" : "❌ 权限被拒绝")
             }
@@ -84,17 +91,27 @@ struct ContentView: View {
             }
             updateTranslationConfig()
         }
+        .onChange(of: defaultEngine) { _, newValue in useDeepgram = newValue == "deepgram" }
         .onChange(of: sourceLanguage) { _, _ in updateTranslationConfig() }
         .onChange(of: targetLanguage) { _, _ in updateTranslationConfig() }
         .onChange(of: currentTranscript) { _, newText in
-            guard !newText.isEmpty, sourceLanguage != targetLanguage else { return }
+            guard !newText.isEmpty, sourceLanguage != targetLanguage, autoTranslate else { return }
             Task {
-                guard let session = translationSession else { return }
-                do {
-                    let response = try await session.translate(newText)
-                    translatedText = response.targetText
-                } catch {
-                    print("❌ 翻译错误: \(error.localizedDescription)")
+                if translationEngine == "deepseek" {
+                    let result = await DeepSeekService.shared.translateText(
+                        text: newText,
+                        from: sourceLanguage.displayName,
+                        to: targetLanguage.displayName
+                    )
+                    translatedText = result
+                } else {
+                    guard let session = translationSession else { return }
+                    do {
+                        let response = try await session.translate(newText)
+                        translatedText = response.targetText
+                    } catch {
+                        print("❌ 翻译错误: \(error.localizedDescription)")
+                    }
                 }
             }
         }
@@ -321,7 +338,7 @@ struct ContentView: View {
 
         let original = currentTranscript
         let translated = translatedText
-        guard !original.isEmpty, !translated.isEmpty else { return }
+        guard !original.isEmpty, !translated.isEmpty, autoSaveRecords else { return }
         autoSave(original: original, translated: translated)
     }
 
@@ -334,6 +351,7 @@ struct ContentView: View {
         )
         modelContext.insert(record)
 
+        guard autoGenerateTitle else { return }
         Task {
             if let meta = await DeepSeekService.shared.generateMetadata(
                 original: original, translated: translated

@@ -52,7 +52,9 @@ final class DeepSeekService {
     // MARK: - 底层请求
 
     private func chat(system: String, user: String) async -> String? {
-        let apiKey = Secrets.deepSeekAPIKey
+        // 优先使用设置页面保存的 key，否则回落到 xcconfig
+        let stored = UserDefaults.standard.string(forKey: "deepseekAPIKey") ?? ""
+        let apiKey = stored.isEmpty ? Secrets.deepSeekAPIKey : stored
         guard !apiKey.isEmpty else {
             print("ℹ️ DEEPSEEK_API_KEY 未配置")
             return nil

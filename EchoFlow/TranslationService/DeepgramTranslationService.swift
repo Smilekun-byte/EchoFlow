@@ -12,7 +12,12 @@ class DeepgramService: ObservableObject {
 
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?          // 必须持有 session，否则 task 会被系统回收
-    private let apiKey = Secrets.deepgramAPIKey
+
+    // 优先使用设置页面保存的 key，否则回落到 xcconfig
+    private var apiKey: String {
+        let stored = UserDefaults.standard.string(forKey: "deepgramAPIKey") ?? ""
+        return stored.isEmpty ? Secrets.deepgramAPIKey : stored
+    }
 
     @Published var transcribedText: String = ""
     @Published var isConnected: Bool = false
@@ -60,19 +65,12 @@ class DeepgramService: ObservableObject {
         }
         guard let channelData = buffer.floatChannelData?[0] else { return }
 
+        // 增益已在 AudioCaptureManager 的 tap 中处理，这里只做 float→int16 转换
         let frameCount = Int(buffer.frameLength)
         var int16Samples = [Int16](repeating: 0, count: frameCount)
-
-        // 先算原始 RMS，再动态增益：目标 RMS=0.06，增益上限 10x
         var sumSquares: Float = 0
-        for i in 0..<frameCount { sumSquares += channelData[i] * channelData[i] }
-        let rawRMS = sqrt(sumSquares / Float(frameCount))
-        let targetRMS: Float = 0.04
-        let gain: Float = rawRMS > 0.001 ? min(targetRMS / rawRMS, 5.0) : 1.0
-
-        sumSquares = 0
         for i in 0..<frameCount {
-            let sample = max(-1.0, min(1.0, channelData[i] * gain))
+            let sample = max(-1.0, min(1.0, channelData[i]))
             int16Samples[i] = Int16(sample * 32767)
             sumSquares += sample * sample
         }
