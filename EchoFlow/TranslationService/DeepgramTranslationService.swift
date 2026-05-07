@@ -20,11 +20,13 @@ class DeepgramService: ObservableObject {
     // MARK: - 连接 Deepgram
     func connect(sampleRate: Double = 48000) {
         let urlString = "wss://api.deepgram.com/v1/listen?" +
-            "encoding=linear16" +
+            "model=nova-2" +
+            "&encoding=linear16" +
             "&sample_rate=\(Int(sampleRate))" +
             "&channels=1" +
-            "&language=zh" +
+            "&language=zh-CN" +
             "&punctuate=true" +
+            "&smart_format=true" +
             "&interim_results=true"
 
         guard let url = URL(string: urlString) else {
@@ -61,8 +63,14 @@ class DeepgramService: ObservableObject {
         let frameCount = Int(buffer.frameLength)
         var int16Samples = [Int16](repeating: 0, count: frameCount)
 
-        let gain: Float = 3.0  // 软件增益，提升小声说话的识别率
+        // 先算原始 RMS，再动态增益：目标 RMS=0.06，增益上限 10x
         var sumSquares: Float = 0
+        for i in 0..<frameCount { sumSquares += channelData[i] * channelData[i] }
+        let rawRMS = sqrt(sumSquares / Float(frameCount))
+        let targetRMS: Float = 0.04
+        let gain: Float = rawRMS > 0.001 ? min(targetRMS / rawRMS, 5.0) : 1.0
+
+        sumSquares = 0
         for i in 0..<frameCount {
             let sample = max(-1.0, min(1.0, channelData[i] * gain))
             int16Samples[i] = Int16(sample * 32767)
