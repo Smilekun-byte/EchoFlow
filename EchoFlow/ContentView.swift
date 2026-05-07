@@ -21,6 +21,7 @@ struct ContentView: View {
     @State private var waves: [WaveRing] = []
     @State private var waveTimer: Timer?
 
+    @Namespace private var engineNS
     @Environment(\.colorScheme) private var colorScheme
 
     var currentTranscript: String {
@@ -105,7 +106,7 @@ struct ContentView: View {
     }
 
     private var enginePicker: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             engineTab("Deepgram", selected: useDeepgram)  { useDeepgram = true  }
             engineTab("Apple",    selected: !useDeepgram) { useDeepgram = false }
         }
@@ -115,17 +116,23 @@ struct ContentView: View {
     }
 
     private func engineTab(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button(action: {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { action() }
+        }) {
             Text(title)
                 .font(.subheadline.weight(.medium))
                 .foregroundColor(selected ? deepBlue : .secondary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
-                .background(selected ? Color.white.opacity(0.9) : Color.clear)
-                .clipShape(Capsule())
+                .background {
+                    if selected {
+                        Capsule()
+                            .fill(Color.white.opacity(0.9))
+                            .matchedGeometryEffect(id: "engineSlider", in: engineNS)
+                    }
+                }
         }
         .buttonStyle(.plain)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selected)
     }
 
     private var languageSelector: some View {
@@ -235,30 +242,33 @@ struct ContentView: View {
                     .frame(width: 72 * ring.scale, height: 72 * ring.scale)
             }
 
-            Button {
-                if isRecording {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                } else {
-                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                }
-                toggleRecording()
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(isRecording ? AnyShapeStyle(accentBlue) : AnyShapeStyle(.ultraThinMaterial))
-                        .frame(width: 72, height: 72)
-                        .shadow(
-                            color: isRecording ? accentBlue.opacity(0.45) : accentBlue.opacity(0.15),
-                            radius: isRecording ? 16 : 10
-                        )
+            ZStack {
+                Circle()
+                    .fill(isRecording ? AnyShapeStyle(accentBlue) : AnyShapeStyle(.ultraThinMaterial))
+                    .frame(width: 72, height: 72)
+                    .shadow(
+                        color: isRecording ? accentBlue.opacity(0.45) : accentBlue.opacity(0.15),
+                        radius: isRecording ? 16 : 10
+                    )
 
-                    Image(systemName: isRecording ? "mic.fill" : "mic")
-                        .font(.system(size: 28, weight: .medium))
-                        .foregroundColor(isRecording ? .white : accentBlue)
-                }
+                Image(systemName: isRecording ? "mic.fill" : "mic")
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundColor(isRecording ? .white : accentBlue)
             }
-            .buttonStyle(.plain)
             .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isRecording)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        if !isRecording {
+                            startRecording()
+                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                        }
+                    }
+                    .onEnded { _ in
+                        stopRecording()
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+            )
         }
         .frame(height: 130)
     }
@@ -280,31 +290,31 @@ struct ContentView: View {
         )
     }
 
-    private func toggleRecording() {
-        if isRecording {
-            audioManager.stopRecording()
+    private func startRecording() {
+        do {
+            try audioManager.startRecording()
             if useDeepgram {
-                deepgramService.disconnect()
+                deepgramService.connect(sampleRate: audioManager.actualSampleRate)
             } else {
-                appleTranscription.stopTranscription()
+                appleTranscription.startTranscription()
             }
-            isRecording = false
-            stopWaveTimer()
-        } else {
-            do {
-                try audioManager.startRecording()
-                if useDeepgram {
-                    deepgramService.connect(sampleRate: audioManager.actualSampleRate)
-                } else {
-                    appleTranscription.startTranscription()
-                }
-                isRecording = true
-                errorMessage = nil
-                startWaveTimer()
-            } catch {
-                errorMessage = "启动失败: \(error.localizedDescription)"
-            }
+            isRecording = true
+            errorMessage = nil
+            startWaveTimer()
+        } catch {
+            errorMessage = "启动失败: \(error.localizedDescription)"
         }
+    }
+
+    private func stopRecording() {
+        audioManager.stopRecording()
+        if useDeepgram {
+            deepgramService.disconnect()
+        } else {
+            appleTranscription.stopTranscription()
+        }
+        isRecording = false
+        stopWaveTimer()
     }
 
     private func startWaveTimer() {
