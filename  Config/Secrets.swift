@@ -9,7 +9,7 @@ enum Secrets {
         return key
     }()
 
-    static let anthropicAPIKey: String = {
-        Bundle.main.infoDictionary?["ANTHROPIC_API_KEY"] as? String ?? ""
+    static let deepSeekAPIKey: String = {
+        Bundle.main.infoDictionary?["DEEPSEEK_API_KEY"] as? String ?? ""
     }()
 }

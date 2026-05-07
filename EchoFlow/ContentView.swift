@@ -335,7 +335,7 @@ struct ContentView: View {
         modelContext.insert(record)
 
         Task {
-            if let meta = await ClaudeMetadataService.shared.generateMetadata(
+            if let meta = await DeepSeekService.shared.generateMetadata(
                 original: original, translated: translated
             ) {
                 record.title = meta.title
