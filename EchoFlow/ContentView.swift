@@ -1,8 +1,11 @@
 import SwiftUI
+import SwiftData
 import Translation
 import UIKit
 
 struct ContentView: View {
+
+    @Environment(\.modelContext) private var modelContext
 
     @StateObject private var audioManager = AudioCaptureManager()
     @StateObject private var appleTranscription = TranscriptionService()
@@ -315,6 +318,30 @@ struct ContentView: View {
         }
         isRecording = false
         stopWaveTimer()
+
+        let original = currentTranscript
+        let translated = translatedText
+        guard !original.isEmpty, !translated.isEmpty else { return }
+        autoSave(original: original, translated: translated)
+    }
+
+    private func autoSave(original: String, translated: String) {
+        let record = ConversationRecord(
+            sourceLanguage: sourceLanguage.displayName,
+            targetLanguage: targetLanguage.displayName,
+            originalText: original,
+            translatedText: translated
+        )
+        modelContext.insert(record)
+
+        Task {
+            if let meta = await ClaudeMetadataService.shared.generateMetadata(
+                original: original, translated: translated
+            ) {
+                record.title = meta.title
+                record.keywords = meta.keywords
+            }
+        }
     }
 
     private func startWaveTimer() {
