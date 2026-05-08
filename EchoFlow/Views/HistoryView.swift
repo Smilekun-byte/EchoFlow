@@ -30,8 +30,16 @@ struct HistoryView: View {
             }
             .navigationTitle("历史记录")
             .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .onAppear {
+                let appearance = UINavigationBarAppearance()
+                appearance.configureWithTransparentBackground()
+                appearance.backgroundColor = .clear
+                let deepBlueUI = UIColor(red: 0.172, green: 0.373, blue: 0.541, alpha: 1)
+                appearance.largeTitleTextAttributes = [.foregroundColor: deepBlueUI]
+                appearance.titleTextAttributes = [.foregroundColor: deepBlueUI]
+                UINavigationBar.appearance().standardAppearance = appearance
+                UINavigationBar.appearance().scrollEdgeAppearance = appearance
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
