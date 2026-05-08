@@ -163,17 +163,6 @@ struct SettingsView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
 
-            divider()
-
-            row(icon: "waveform", label: "采样率") {
-                Picker("", selection: $sampleRate) {
-                    Text("16 kHz").tag("16000")
-                    Text("44.1 kHz").tag("44100")
-                    Text("48 kHz").tag("48000")
-                }
-                .pickerStyle(.menu)
-                .tint(accentBlue)
-            }
         }
     }
 

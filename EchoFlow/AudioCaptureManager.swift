@@ -24,11 +24,6 @@ class AudioCaptureManager: ObservableObject {
     func startRecording() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
-
-        // 请求用户偏好的采样率（iOS 可能不完全支持）
-        let preferredRate = Double(UserDefaults.standard.string(forKey: "sampleRate") ?? "16000") ?? 16000
-        try? session.setPreferredSampleRate(preferredRate)
-
         try session.setActive(true, options: .notifyOthersOnDeactivation)
 
         let inputNode = audioEngine.inputNode
