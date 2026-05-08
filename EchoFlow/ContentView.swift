@@ -24,6 +24,9 @@ struct ContentView: View {
     @State private var waves: [WaveRing] = []
     @State private var waveTimer: Timer?
 
+    @State private var correctedText: String = ""
+    @State private var isCorrectingText: Bool = false
+
     @AppStorage("defaultEngine")      private var defaultEngine      = "deepgram"
     @AppStorage("autoSaveRecords")    private var autoSaveRecords    = true
     @AppStorage("autoGenerateTitle")  private var autoGenerateTitle  = true
@@ -104,6 +107,7 @@ struct ContentView: View {
             deepgramService.transcribedText = ""
             appleTranscription.transcribedText = ""
             translatedText = ""
+            correctedText = ""
         }
         .onChange(of: defaultEngine) { _, newValue in useDeepgram = newValue == "deepgram" }
         .onChange(of: sourceLanguage) { _, _ in updateTranslationConfig() }
@@ -214,11 +218,38 @@ struct ContentView: View {
     private var transcriptCard: some View {
         glassCard {
             VStack(alignment: .leading, spacing: 10) {
+                // Header
                 HStack {
                     Text("原文")
                         .font(.caption.weight(.medium))
                         .foregroundColor(.secondary)
                     Spacer()
+                    // 纠错按钮
+                    if !currentTranscript.isEmpty {
+                        Button {
+                            correctCurrentTranscript()
+                        } label: {
+                            HStack(spacing: 4) {
+                                if isCorrectingText {
+                                    ProgressView()
+                                        .scaleEffect(0.65)
+                                        .tint(accentBlue)
+                                } else {
+                                    Image(systemName: "wand.and.stars")
+                                        .font(.caption2.weight(.semibold))
+                                }
+                                Text(isCorrectingText ? "纠错中" : "纠错")
+                                    .font(.caption2.weight(.semibold))
+                            }
+                            .foregroundColor(accentBlue)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(accentBlue.opacity(0.12))
+                            .clipShape(Capsule())
+                        }
+                        .disabled(isCorrectingText)
+                        .animation(.easeInOut(duration: 0.2), value: isCorrectingText)
+                    }
                     Text(useDeepgram ? "Deepgram" : "Apple")
                         .font(.caption2.weight(.semibold))
                         .foregroundColor(accentBlue)
@@ -227,6 +258,8 @@ struct ContentView: View {
                         .background(accentBlue.opacity(0.12))
                         .clipShape(Capsule())
                 }
+
+                // 原始识别文字
                 ScrollView {
                     Text(currentTranscript.isEmpty ? "开始说话..." : currentTranscript)
                         .font(.body)
@@ -234,7 +267,42 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(minHeight: 100)
+
+                // 纠错结果区块
+                if !correctedText.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.caption2)
+                                .foregroundColor(accentBlue)
+                            Text("纠错结果")
+                                .font(.caption.weight(.medium))
+                                .foregroundColor(accentBlue)
+                            Spacer()
+                            Button {
+                                correctedText = ""
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        Text(correctedText)
+                            .font(.body)
+                            .foregroundColor(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(12)
+                    .background(deepBlue.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(accentBlue.opacity(0.2), lineWidth: 1)
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: correctedText.isEmpty)
         }
     }
 
@@ -324,7 +392,23 @@ struct ContentView: View {
         )
     }
 
+    private func correctCurrentTranscript() {
+        let text = currentTranscript
+        guard !text.isEmpty, !isCorrectingText else { return }
+        isCorrectingText = true
+        correctedText = ""
+        Task {
+            let result = await DeepSeekService.shared.correctTranscript(
+                text: text,
+                language: sourceLanguage.displayName
+            )
+            correctedText = result == text ? "" : result
+            isCorrectingText = false
+        }
+    }
+
     private func startRecording() {
+        correctedText = ""
         do {
             try audioManager.startRecording()
             if useDeepgram {
