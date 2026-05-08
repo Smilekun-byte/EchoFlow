@@ -73,8 +73,7 @@ struct FolderView: View {
             }
             .navigationTitle("文件夹")
             .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .onAppear { applyTransparentNavBar() }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { showCreate = true } label: {
@@ -239,8 +238,7 @@ struct VirtualFolderDetailView: View {
         }
         .navigationTitle("\(type.icon) \(type.name)")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .onAppear { applyTransparentNavBar() }
     }
 }
 
@@ -282,8 +280,7 @@ struct CustomFolderDetailView: View {
         }
         .navigationTitle("\(folder.icon) \(folder.name)")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .onAppear { applyTransparentNavBar() }
     }
 }
 
@@ -447,3 +444,16 @@ extension Color {
 // MARK: - VirtualFolderType: Hashable (for navigationDestination)
 
 extension VirtualFolderType: Hashable {}
+
+// MARK: - Shared Nav Bar Helper
+
+private func applyTransparentNavBar() {
+    let appearance = UINavigationBarAppearance()
+    appearance.configureWithTransparentBackground()
+    appearance.backgroundColor = .clear
+    let deepBlueUI = UIColor(red: 0.172, green: 0.373, blue: 0.541, alpha: 1)
+    appearance.largeTitleTextAttributes = [.foregroundColor: deepBlueUI]
+    appearance.titleTextAttributes = [.foregroundColor: deepBlueUI]
+    UINavigationBar.appearance().standardAppearance = appearance
+    UINavigationBar.appearance().scrollEdgeAppearance = appearance
+}
