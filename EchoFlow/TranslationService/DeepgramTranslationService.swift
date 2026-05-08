@@ -139,6 +139,7 @@ class DeepgramService: ObservableObject {
         session = nil
         DispatchQueue.main.async {
             self.isConnected = false
+            self.transcribedText = ""
         }
         print("🛑 Deepgram 已断开")
     }

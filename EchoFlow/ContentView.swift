@@ -91,6 +91,20 @@ struct ContentView: View {
             }
             updateTranslationConfig()
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            if isRecording {
+                audioManager.stopRecording()
+                deepgramService.disconnect()
+                appleTranscription.stopTranscription()
+                isRecording = false
+                stopWaveTimer()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            deepgramService.transcribedText = ""
+            appleTranscription.transcribedText = ""
+            translatedText = ""
+        }
         .onChange(of: defaultEngine) { _, newValue in useDeepgram = newValue == "deepgram" }
         .onChange(of: sourceLanguage) { _, _ in updateTranslationConfig() }
         .onChange(of: targetLanguage) { _, _ in updateTranslationConfig() }
