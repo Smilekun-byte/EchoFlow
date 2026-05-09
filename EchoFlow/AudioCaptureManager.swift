@@ -1,6 +1,6 @@
 //
 //  AudioRecorder.swift
-//  EchoFlow
+//  共鳴
 //
 //  Created by 漆咚 on 2026/04/04.
 //

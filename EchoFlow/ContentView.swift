@@ -141,7 +141,7 @@ struct ContentView: View {
     // MARK: - Subviews
 
     private var title: some View {
-        Text("EchoFlow")
+        Text("共鳴")
             .font(.system(.title, design: .rounded, weight: .semibold))
             .foregroundColor(deepBlue)
     }

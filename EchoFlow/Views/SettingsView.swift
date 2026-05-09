@@ -250,7 +250,7 @@ struct SettingsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("EchoFlow")
+                    Text("共鳴")
                         .font(.system(.headline, design: .rounded, weight: .semibold))
                         .foregroundColor(deepBlue)
                     Text("版本 \(appVersion)")
