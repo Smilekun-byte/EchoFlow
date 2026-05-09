@@ -378,8 +378,16 @@ struct ContentView: View {
     private var recordButton: some View {
         ZStack {
             ForEach(waves) { ring in
+                let progress = Double(max(0, (ring.scale - 1.0) / max(0.01, ring.targetScale - 1.0)))
                 Circle()
-                    .stroke(ring.color.opacity(ring.opacity), lineWidth: ring.lineWidth)
+                    .stroke(
+                        Color(
+                            red:   0.2 + progress * 0.5,
+                            green: 0.5 + progress * 0.4,
+                            blue:  0.9 + progress * 0.1
+                        ).opacity(0.6 * (1.0 - progress)),
+                        lineWidth: CGFloat(max(0.1, 2.5 * (1.0 - progress)))
+                    )
                     .frame(width: 72 * ring.scale, height: 72 * ring.scale)
             }
 
@@ -539,7 +547,7 @@ struct ContentView: View {
         let rms = audioManager.currentRMS
 
         // Silence detection: pause spawning if silent for > 0.5 s
-        if rms < 0.05 {
+        if rms < 0.02 {
             if silenceStart == nil { silenceStart = Date() }
             let elapsed = Date().timeIntervalSince(silenceStart!)
             if elapsed > 0.5 {
@@ -554,14 +562,14 @@ struct ContentView: View {
 
         spawnWave(rms: rms)
 
-        let interval = Double(max(0.4, 1.2 - rms * 0.8))
+        let interval = Double(max(0.15, 0.4 - rms * 0.25))
         DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
             self.scheduleNextWave(token: token)
         }
     }
 
     private func spawnWave(rms: Float) {
-        let maxWaves = max(1, min(4, 1 + Int(rms * 3.0)))
+        let maxWaves = max(1, min(6, 1 + Int(rms * 5.0)))
         guard waves.count < maxWaves else { return }
         let impact = UIImpactFeedbackGenerator(style: .soft)
         impact.impactOccurred(intensity: CGFloat(max(0.1, rms)))
@@ -570,10 +578,10 @@ struct ContentView: View {
         let id = ring.id
         let duration = 1.2 + Double(1.0 - rms) * 0.6
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            // 只动画 scale；opacity/color/lineWidth 由视图层从 scale 实时推导
             withAnimation(.easeOut(duration: duration)) {
                 if let idx = self.waves.firstIndex(where: { $0.id == id }) {
                     self.waves[idx].scale = self.waves[idx].targetScale
-                    self.waves[idx].opacity = 0.0
                 }
             }
         }
@@ -588,16 +596,10 @@ struct ContentView: View {
 private struct WaveRing: Identifiable {
     let id = UUID()
     var scale: CGFloat = 1.0
-    var opacity: Double
     var targetScale: CGFloat
-    var lineWidth: CGFloat
-    var color: Color
 
     init(rms: Float) {
-        let r = Double(rms)
-        targetScale = CGFloat(1.2 + r * 3.0)
-        opacity = 0.15 + r * 0.7
-        lineWidth = CGFloat(0.5 + r * 3.0)
-        color = Color(hue: 0.6, saturation: 0.3 + r * 0.5, brightness: 0.9)
+        // 安静时也能扩散到 2.5x，大声时扩散到 4.5x
+        targetScale = CGFloat(2.5 + Double(rms) * 2.0)
     }
 }
