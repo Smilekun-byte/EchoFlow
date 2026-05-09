@@ -22,7 +22,8 @@ struct ContentView: View {
     @State private var translationSession: TranslationSession?
 
     @State private var waves: [WaveRing] = []
-    @State private var waveTimer: Timer?
+    @State private var waveToken: UUID?
+    @State private var silenceStart: Date?
 
     @State private var correctedText: String = ""
     @State private var isCorrectingText: Bool = false
@@ -102,12 +103,14 @@ struct ContentView: View {
                 isRecording = false
                 stopWaveTimer()
             }
+            audioManager.suspendHaptics()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             deepgramService.transcribedText = ""
             appleTranscription.transcribedText = ""
             translatedText = ""
             correctedText = ""
+            audioManager.resumeHaptics()
         }
         .onChange(of: defaultEngine) { _, newValue in useDeepgram = newValue == "deepgram" }
         .onChange(of: sourceLanguage) { _, _ in updateTranslationConfig() }
@@ -340,7 +343,7 @@ struct ContentView: View {
         ZStack {
             ForEach(waves) { ring in
                 Circle()
-                    .stroke(accentBlue.opacity(ring.opacity), lineWidth: 2.0 / ring.scale)
+                    .stroke(ring.color.opacity(ring.opacity), lineWidth: ring.lineWidth)
                     .frame(width: 72 * ring.scale, height: 72 * ring.scale)
             }
 
@@ -357,6 +360,8 @@ struct ContentView: View {
                     .font(.system(size: 28, weight: .medium))
                     .foregroundColor(isRecording ? .white : accentBlue)
             }
+            .scaleEffect(isRecording ? 1.0 + CGFloat(audioManager.currentRMS) * 0.15 : 1.0)
+            .animation(.easeInOut(duration: 0.1), value: audioManager.currentRMS)
             .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isRecording)
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -461,33 +466,63 @@ struct ContentView: View {
     }
 
     private func startWaveTimer() {
-        waveTimer?.invalidate()
-        spawnWave()
-        waveTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { _ in
-            spawnWave()
-        }
+        let token = UUID()
+        waveToken = token
+        silenceStart = nil
+        scheduleNextWave(token: token)
     }
 
     private func stopWaveTimer() {
-        waveTimer?.invalidate()
-        waveTimer = nil
-        // existing waves finish their own animations naturally
+        waveToken = nil
+        silenceStart = nil
     }
 
-    private func spawnWave() {
-        let ring = WaveRing()
+    private func scheduleNextWave(token: UUID) {
+        guard waveToken == token else { return }
+
+        let rms = audioManager.currentRMS
+
+        // Silence detection: pause spawning if silent for > 0.5 s
+        if rms < 0.05 {
+            if silenceStart == nil { silenceStart = Date() }
+            let elapsed = Date().timeIntervalSince(silenceStart!)
+            if elapsed > 0.5 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    self.scheduleNextWave(token: token)
+                }
+                return
+            }
+        } else {
+            silenceStart = nil
+        }
+
+        spawnWave(rms: rms)
+
+        let interval = Double(max(0.4, 1.2 - rms * 0.8))
+        DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
+            self.scheduleNextWave(token: token)
+        }
+    }
+
+    private func spawnWave(rms: Float) {
+        let maxWaves = max(1, min(4, 1 + Int(rms * 3.0)))
+        guard waves.count < maxWaves else { return }
+        let impact = UIImpactFeedbackGenerator(style: .soft)
+        impact.impactOccurred(intensity: CGFloat(max(0.1, rms)))
+        let ring = WaveRing(rms: rms)
         waves.append(ring)
         let id = ring.id
+        let duration = 1.2 + Double(1.0 - rms) * 0.6
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            withAnimation(.easeOut(duration: 1.6)) {
-                if let idx = waves.firstIndex(where: { $0.id == id }) {
-                    waves[idx].scale = 2.5
-                    waves[idx].opacity = 0.0
+            withAnimation(.easeOut(duration: duration)) {
+                if let idx = self.waves.firstIndex(where: { $0.id == id }) {
+                    self.waves[idx].scale = self.waves[idx].targetScale
+                    self.waves[idx].opacity = 0.0
                 }
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.65) {
-            waves.removeAll { $0.id == id }
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.1) {
+            self.waves.removeAll { $0.id == id }
         }
     }
 }
@@ -497,5 +532,16 @@ struct ContentView: View {
 private struct WaveRing: Identifiable {
     let id = UUID()
     var scale: CGFloat = 1.0
-    var opacity: Double = 0.5
+    var opacity: Double
+    var targetScale: CGFloat
+    var lineWidth: CGFloat
+    var color: Color
+
+    init(rms: Float) {
+        let r = Double(rms)
+        targetScale = CGFloat(1.2 + r * 3.0)
+        opacity = 0.15 + r * 0.7
+        lineWidth = CGFloat(0.5 + r * 3.0)
+        color = Color(hue: 0.6, saturation: 0.3 + r * 0.5, brightness: 0.9)
+    }
 }
