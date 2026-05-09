@@ -28,6 +28,11 @@ struct ContentView: View {
     @State private var correctedText: String = ""
     @State private var isCorrectingText: Bool = false
 
+    @State private var editedTranscript: String = ""
+    @FocusState private var isEditorFocused: Bool
+    @State private var translationDebounceTask: Task<Void, Never>?
+    @State private var showRetranslated: Bool = false
+
     @AppStorage("defaultEngine")      private var defaultEngine      = "deepgram"
     @AppStorage("autoSaveRecords")    private var autoSaveRecords    = true
     @AppStorage("autoGenerateTitle")  private var autoGenerateTitle  = true
@@ -81,6 +86,10 @@ struct ContentView: View {
                 .padding(.bottom, 32)
             }
         }
+        .onTapGesture {
+            UIApplication.shared.sendAction(
+                #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
         .translationTask(translationConfig) { session in
             translationSession = session
         }
@@ -110,30 +119,30 @@ struct ContentView: View {
             appleTranscription.transcribedText = ""
             translatedText = ""
             correctedText = ""
+            editedTranscript = ""
             audioManager.resumeHaptics()
         }
         .onChange(of: defaultEngine) { _, newValue in useDeepgram = newValue == "deepgram" }
         .onChange(of: sourceLanguage) { _, _ in updateTranslationConfig() }
         .onChange(of: targetLanguage) { _, _ in updateTranslationConfig() }
         .onChange(of: currentTranscript) { _, newText in
+            // 录音时同步到可编辑字段，并立即翻译
+            editedTranscript = newText
+            guard !newText.isEmpty, sourceLanguage != targetLanguage, autoTranslate, isRecording else { return }
+            Task { await performTranslation(newText) }
+        }
+        .onChange(of: editedTranscript) { _, newText in
+            // 用户手动编辑时防抖 0.8s 后翻译
+            guard !isRecording else { return }
+            translationDebounceTask?.cancel()
             guard !newText.isEmpty, sourceLanguage != targetLanguage, autoTranslate else { return }
-            Task {
-                if translationEngine == "deepseek" {
-                    let result = await DeepSeekService.shared.translateText(
-                        text: newText,
-                        from: sourceLanguage.displayName,
-                        to: targetLanguage.displayName
-                    )
-                    translatedText = result
-                } else {
-                    guard let session = translationSession else { return }
-                    do {
-                        let response = try await session.translate(newText)
-                        translatedText = response.targetText
-                    } catch {
-                        print("❌ 翻译错误: \(error.localizedDescription)")
-                    }
-                }
+            translationDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                guard !Task.isCancelled else { return }
+                await performTranslation(newText)
+                showRetranslated = true
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                showRetranslated = false
             }
         }
     }
@@ -228,7 +237,7 @@ struct ContentView: View {
                         .foregroundColor(.secondary)
                     Spacer()
                     // 纠错按钮
-                    if !currentTranscript.isEmpty {
+                    if !editedTranscript.isEmpty {
                         Button {
                             correctCurrentTranscript()
                         } label: {
@@ -253,23 +262,44 @@ struct ContentView: View {
                         .disabled(isCorrectingText)
                         .animation(.easeInOut(duration: 0.2), value: isCorrectingText)
                     }
-                    Text(useDeepgram ? "Deepgram" : "Apple")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundColor(accentBlue)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(accentBlue.opacity(0.12))
-                        .clipShape(Capsule())
+                    // 状态标签：编辑中 / 已重新翻译 / 引擎名
+                    Group {
+                        if isEditorFocused {
+                            Label("编辑中", systemImage: "pencil")
+                        } else if showRetranslated {
+                            Label("已重新翻译", systemImage: "arrow.counterclockwise")
+                        } else {
+                            Text(useDeepgram ? "Deepgram" : "Apple")
+                        }
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(isEditorFocused ? accentBlue : (showRetranslated ? .green : accentBlue))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background((isEditorFocused ? accentBlue : (showRetranslated ? Color.green : accentBlue)).opacity(0.12))
+                    .clipShape(Capsule())
+                    .animation(.easeInOut(duration: 0.2), value: isEditorFocused)
+                    .animation(.easeInOut(duration: 0.2), value: showRetranslated)
                 }
 
-                // 原始识别文字
-                ScrollView {
-                    Text(currentTranscript.isEmpty ? "开始说话..." : currentTranscript)
+                // 可编辑原文区域
+                ZStack(alignment: .topLeading) {
+                    if editedTranscript.isEmpty && !isEditorFocused {
+                        Text("开始说话...")
+                            .font(.body)
+                            .foregroundColor(.secondary.opacity(0.6))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 8)
+                            .allowsHitTesting(false)
+                    }
+                    TextEditor(text: $editedTranscript)
                         .font(.body)
-                        .foregroundColor(currentTranscript.isEmpty ? .secondary.opacity(0.6) : .primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .foregroundColor(.primary)
+                        .scrollContentBackground(.hidden)
+                        .background(.clear)
+                        .frame(minHeight: 100)
+                        .focused($isEditorFocused)
                 }
-                .frame(minHeight: 100)
 
                 // 纠错结果区块
                 if !correctedText.isEmpty {
@@ -307,6 +337,12 @@ struct ContentView: View {
             }
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: correctedText.isEmpty)
         }
+        // 编辑时蓝色边框
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(accentBlue.opacity(isEditorFocused ? 0.6 : 0), lineWidth: 2)
+        )
+        .animation(.easeInOut(duration: 0.2), value: isEditorFocused)
     }
 
     private var translationCard: some View {
@@ -397,8 +433,28 @@ struct ContentView: View {
         )
     }
 
+    @MainActor
+    private func performTranslation(_ text: String) async {
+        if translationEngine == "deepseek" {
+            let result = await DeepSeekService.shared.translateText(
+                text: text,
+                from: sourceLanguage.displayName,
+                to: targetLanguage.displayName
+            )
+            translatedText = result
+        } else {
+            guard let session = translationSession else { return }
+            do {
+                let response = try await session.translate(text)
+                translatedText = response.targetText
+            } catch {
+                print("❌ 翻译错误: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func correctCurrentTranscript() {
-        let text = currentTranscript
+        let text = editedTranscript
         guard !text.isEmpty, !isCorrectingText else { return }
         isCorrectingText = true
         correctedText = ""
@@ -439,7 +495,7 @@ struct ContentView: View {
         isRecording = false
         stopWaveTimer()
 
-        let original = currentTranscript
+        let original = editedTranscript
         let translated = translatedText
         guard !original.isEmpty, !translated.isEmpty, autoSaveRecords else { return }
         autoSave(original: original, translated: translated)
