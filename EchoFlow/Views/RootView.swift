@@ -24,6 +24,9 @@ struct RootView: View {
             FolderView()
                 .tabItem { Label("文件夹", systemImage: "folder.fill") }
 
+            OCRView()
+                .tabItem { Label("扫描", systemImage: "camera.viewfinder") }
+
             SettingsView()
                 .tabItem { Label("设置", systemImage: "gear") }
         }
