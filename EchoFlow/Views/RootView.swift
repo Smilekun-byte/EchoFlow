@@ -27,6 +27,9 @@ struct RootView: View {
             OCRView()
                 .tabItem { Label("扫描", systemImage: "camera.viewfinder") }
 
+            LiveTextView()
+                .tabItem { Label("识图", systemImage: "text.viewfinder") }
+
             SettingsView()
                 .tabItem { Label("设置", systemImage: "gear") }
         }
