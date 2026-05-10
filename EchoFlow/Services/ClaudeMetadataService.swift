@@ -39,6 +39,12 @@ final class DeepSeekService {
         return result ?? text
     }
 
+    // MARK: - 通用补全（供外部调用）
+
+    func complete(system: String, user: String) async -> String {
+        await chat(system: system, user: user) ?? ""
+    }
+
     // MARK: - 备用翻译
 
     func translateText(text: String, from: String, to: String) async -> String {
