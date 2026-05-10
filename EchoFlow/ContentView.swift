@@ -21,9 +21,9 @@ struct ContentView: View {
     @State private var translationConfig: TranslationSession.Configuration?
     @State private var translationSession: TranslationSession?
 
+    @State private var particles: [Particle] = []
     @State private var waves: [WaveRing] = []
-    @State private var waveToken: UUID?
-    @State private var silenceStart: Date?
+    @State private var waveTimer: Timer?
 
     @State private var correctedText: String = ""
     @State private var isCorrectingText: Bool = false
@@ -110,7 +110,7 @@ struct ContentView: View {
                 deepgramService.disconnect()
                 appleTranscription.stopTranscription()
                 isRecording = false
-                stopWaveTimer()
+                stopRecordingAnimation()
             }
             audioManager.suspendHaptics()
         }
@@ -377,20 +377,31 @@ struct ContentView: View {
 
     private var recordButton: some View {
         ZStack {
-            ForEach(waves) { ring in
-                let progress = Double(max(0, (ring.scale - 1.0) / max(0.01, ring.targetScale - 1.0)))
+            // 粒子层
+            ForEach(particles) { p in
+                Circle()
+                    .fill(p.color)
+                    .frame(width: p.size, height: p.size)
+                    .offset(x: p.x, y: p.y)
+                    .opacity(p.opacity)
+            }
+
+            // 波纹层
+            ForEach(waves) { wave in
                 Circle()
                     .stroke(
                         Color(
-                            red:   0.2 + progress * 0.5,
-                            green: 0.5 + progress * 0.4,
-                            blue:  0.9 + progress * 0.1
-                        ).opacity(0.6 * (1.0 - progress)),
-                        lineWidth: CGFloat(max(0.1, 2.5 * (1.0 - progress)))
+                            red:   0.2 + Double(wave.scale) * 0.1,
+                            green: 0.5 + Double(wave.scale) * 0.1,
+                            blue:  0.9
+                        ),
+                        lineWidth: max(0.3, 2.5 - wave.scale * 0.5)
                     )
-                    .frame(width: 72 * ring.scale, height: 72 * ring.scale)
+                    .frame(width: 72 * wave.scale, height: 72 * wave.scale)
+                    .opacity(wave.opacity)
             }
 
+            // 麦克风按钮
             ZStack {
                 Circle()
                     .fill(isRecording ? AnyShapeStyle(accentBlue) : AnyShapeStyle(.ultraThinMaterial))
@@ -412,16 +423,15 @@ struct ContentView: View {
                     .onChanged { _ in
                         if !isRecording {
                             startRecording()
-                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                            triggerParticleBurst()
                         }
                     }
                     .onEnded { _ in
                         stopRecording()
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     }
             )
         }
-        .frame(height: 130)
+        .frame(height: 160)
     }
 
     // MARK: - Logic
@@ -487,7 +497,6 @@ struct ContentView: View {
             }
             isRecording = true
             errorMessage = nil
-            startWaveTimer()
         } catch {
             errorMessage = "启动失败: \(error.localizedDescription)"
         }
@@ -501,7 +510,7 @@ struct ContentView: View {
             appleTranscription.stopTranscription()
         }
         isRecording = false
-        stopWaveTimer()
+        stopRecordingAnimation()
 
         let original = editedTranscript
         let translated = translatedText
@@ -529,65 +538,77 @@ struct ContentView: View {
         }
     }
 
-    private func startWaveTimer() {
-        let token = UUID()
-        waveToken = token
-        silenceStart = nil
-        scheduleNextWave(token: token)
+    // MARK: - 粒子爆发（按下瞬间）
+
+    private func triggerParticleBurst() {
+        let colors: [Color] = [
+            Color(red: 0.2, green: 0.5, blue: 0.9),
+            Color(red: 0.4, green: 0.7, blue: 1.0),
+            Color(red: 0.6, green: 0.85, blue: 1.0)
+        ]
+        particles = (0..<40).map { _ in
+            Particle(
+                angle:  Double.random(in: 0..<360),
+                speed:  Double.random(in: 0.8...2.0),
+                size:   CGFloat.random(in: 2...5),
+                opacity: Double.random(in: 0.6...1.0),
+                color:  colors.randomElement()!
+            )
+        }
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+
+        withAnimation(.easeOut(duration: 0.8)) {
+            for i in particles.indices {
+                let rad = particles[i].angle * .pi / 180
+                let dist = CGFloat(particles[i].speed * 80)
+                particles[i].x = cos(rad) * dist
+                particles[i].y = sin(rad) * dist
+                particles[i].opacity = 0
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            self.particles = []
+            self.startWaveAnimation()
+        }
     }
 
-    private func stopWaveTimer() {
-        waveToken = nil
-        silenceStart = nil
+    // MARK: - 水波持续动画（粒子消失后）
+
+    private func startWaveAnimation() {
+        guard isRecording else { return }
+        let interval = max(0.15, 0.4 - Double(audioManager.currentRMS) * 0.25)
+        waveTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.addWave()
+        }
     }
 
-    private func scheduleNextWave(token: UUID) {
-        guard waveToken == token else { return }
-
+    private func addWave() {
         let rms = audioManager.currentRMS
+        let maxScale = CGFloat(1.2 + Double(rms) * 3.0)
+        let wave = WaveRing()
+        waves.append(wave)
+        let id = wave.id
 
-        // Silence detection: pause spawning if silent for > 0.5 s
-        if rms < 0.02 {
-            if silenceStart == nil { silenceStart = Date() }
-            let elapsed = Date().timeIntervalSince(silenceStart!)
-            if elapsed > 0.5 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    self.scheduleNextWave(token: token)
-                }
-                return
-            }
-        } else {
-            silenceStart = nil
-        }
-
-        spawnWave(rms: rms)
-
-        let interval = Double(max(0.15, 0.4 - rms * 0.25))
-        DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
-            self.scheduleNextWave(token: token)
-        }
-    }
-
-    private func spawnWave(rms: Float) {
-        let maxWaves = max(1, min(6, 1 + Int(rms * 5.0)))
-        guard waves.count < maxWaves else { return }
-        let impact = UIImpactFeedbackGenerator(style: .soft)
-        impact.impactOccurred(intensity: CGFloat(max(0.1, rms)))
-        let ring = WaveRing(rms: rms)
-        waves.append(ring)
-        let id = ring.id
-        let duration = 1.2 + Double(1.0 - rms) * 0.6
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            // 只动画 scale；opacity/color/lineWidth 由视图层从 scale 实时推导
-            withAnimation(.easeOut(duration: duration)) {
-                if let idx = self.waves.firstIndex(where: { $0.id == id }) {
-                    self.waves[idx].scale = self.waves[idx].targetScale
-                }
+        withAnimation(.easeOut(duration: 1.6)) {
+            if let idx = self.waves.firstIndex(where: { $0.id == id }) {
+                self.waves[idx].scale = maxScale
+                self.waves[idx].opacity = 0
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.1) {
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.65) {
             self.waves.removeAll { $0.id == id }
         }
+    }
+
+    // MARK: - 停止录音动画
+
+    private func stopRecordingAnimation() {
+        waveTimer?.invalidate()
+        waveTimer = nil
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        // 已有波纹继续播放直到自然消失
     }
 }
 
@@ -596,10 +617,18 @@ struct ContentView: View {
 private struct WaveRing: Identifiable {
     let id = UUID()
     var scale: CGFloat = 1.0
-    var targetScale: CGFloat
+    var opacity: Double = 0.6
+}
 
-    init(rms: Float) {
-        // 安静时也能扩散到 2.5x，大声时扩散到 4.5x
-        targetScale = CGFloat(2.5 + Double(rms) * 2.0)
-    }
+// MARK: - Particle
+
+private struct Particle: Identifiable {
+    let id = UUID()
+    var x: CGFloat = 0
+    var y: CGFloat = 0
+    var angle: Double
+    var speed: Double
+    var size: CGFloat
+    var opacity: Double
+    var color: Color
 }
