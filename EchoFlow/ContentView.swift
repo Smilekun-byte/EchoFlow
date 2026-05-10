@@ -578,8 +578,8 @@ struct ContentView: View {
     private func startWaveAnimation() {
         guard isRecording else { return }
         let interval = max(0.15, 0.4 - Double(audioManager.currentRMS) * 0.25)
-        waveTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            self?.addWave()
+        waveTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            self.addWave()
         }
     }
 
