@@ -557,17 +557,21 @@ struct ContentView: View {
         }
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
 
-        withAnimation(.easeOut(duration: 0.8)) {
-            for i in particles.indices {
-                let rad = particles[i].angle * .pi / 180
-                let dist = CGFloat(particles[i].speed * 80)
-                particles[i].x = cos(rad) * dist
-                particles[i].y = sin(rad) * dist
-                particles[i].opacity = 0
+        // 下一个 RunLoop 再启动动画：让 SwiftUI 先渲染粒子的初始位置（center），
+        // 否则创建与动画在同一帧会被合并，粒子直接跳到终态而看不到爆发过程。
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.8)) {
+                for i in self.particles.indices {
+                    let rad = self.particles[i].angle * .pi / 180
+                    let dist = CGFloat(self.particles[i].speed * 80)
+                    self.particles[i].x = cos(rad) * dist
+                    self.particles[i].y = sin(rad) * dist
+                    self.particles[i].opacity = 0
+                }
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
             self.particles = []
             self.startWaveAnimation()
         }
