@@ -21,6 +21,11 @@ struct LiveTextView: View {
     @State private var showPhotoPicker: Bool   = false
     @State private var showCamera:      Bool   = false
 
+    @State private var scale:      CGFloat  = 1.0
+    @State private var lastScale:  CGFloat  = 1.0
+    @State private var offset:     CGSize   = .zero
+    @State private var lastOffset: CGSize   = .zero
+
     private let accentBlue = Color(red: 0.231, green: 0.510, blue: 0.965)
     private let deepBlue   = Color(red: 0.172, green: 0.373, blue: 0.541)
     @Environment(\.colorScheme) private var colorScheme
@@ -66,8 +71,10 @@ struct LiveTextView: View {
             LiveImagePicker(sourceType: .camera, selectedImage: $selectedImage)
         }
         .onChange(of: selectedImage) { _, image in
-            guard let image else { return }
+            scale = 1.0; lastScale = 1.0
+            offset = .zero; lastOffset = .zero
             wordRegions = []
+            guard let image else { return }
             Task { await analyzeImage(image) }
         }
     }
@@ -103,39 +110,75 @@ struct LiveTextView: View {
         }
     }
 
-    // MARK: - Image card with bounding boxes
+    // MARK: - Image card with bounding boxes + zoom/pan
 
     private func imageCard(_ image: UIImage) -> some View {
         let ratio = image.size.width / max(image.size.height, 1)
-        return Color.clear
-            .aspectRatio(ratio, contentMode: .fit)
-            .overlay(
-                GeometryReader { geo in
-                    ZStack(alignment: .topLeading) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .frame(width: geo.size.width, height: geo.size.height)
+        return VStack(spacing: 8) {
+            Color.clear
+                .aspectRatio(ratio, contentMode: .fit)
+                .overlay(
+                    GeometryReader { geo in
+                        ZStack(alignment: .topLeading) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .frame(width: geo.size.width, height: geo.size.height)
 
-                        ForEach(wordRegions) { region in
-                            let r = convertRect(region.rect, in: geo.size)
-                            Rectangle()
-                                .stroke(Color.blue, lineWidth: 1.5)
-                                .frame(width: r.width, height: r.height)
-                                .position(x: r.midX, y: r.midY)
+                            ForEach(wordRegions) { region in
+                                let r = convertRect(region.rect, in: geo.size)
+                                Rectangle()
+                                    .stroke(Color.blue, lineWidth: 1.5)
+                                    .frame(width: r.width, height: r.height)
+                                    .position(x: r.midX, y: r.midY)
+                            }
+
+                            if isProcessing {
+                                Color.black.opacity(0.2)
+                                ProgressView().tint(.white)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
                         }
-
-                        if isProcessing {
-                            Color.black.opacity(0.2)
-                            ProgressView().tint(.white)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .scaleEffect(scale)
+                        .offset(offset)
+                        .gesture(
+                            MagnificationGesture()
+                                .onChanged { value in
+                                    scale = lastScale * value
+                                }
+                                .onEnded { _ in
+                                    scale = min(max(scale, 1.0), 5.0)
+                                    lastScale = scale
+                                }
+                                .simultaneously(with:
+                                    DragGesture()
+                                        .onChanged { value in
+                                            offset = CGSize(
+                                                width:  lastOffset.width  + value.translation.width,
+                                                height: lastOffset.height + value.translation.height
+                                            )
+                                        }
+                                        .onEnded { _ in
+                                            lastOffset = offset
+                                        }
+                                )
+                        )
+                        .onTapGesture(count: 2) {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                scale = 1.0;  lastScale  = 1.0
+                                offset = .zero; lastOffset = .zero
+                            }
                         }
                     }
-                }
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.6), lineWidth: 1))
-            .shadow(color: deepBlue.opacity(0.1), radius: 12, x: 0, y: 4)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Color.white.opacity(0.6), lineWidth: 1))
+                .shadow(color: deepBlue.opacity(0.1), radius: 12, x: 0, y: 4)
+
+            Text("双指缩放 · 双击还原")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
     }
 
     /// Vision 归一化坐标（左下原点）→ SwiftUI 视图坐标（左上原点）
