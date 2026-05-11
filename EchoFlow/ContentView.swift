@@ -594,10 +594,13 @@ struct ContentView: View {
         waves.append(wave)
         let id = wave.id
 
-        withAnimation(.easeOut(duration: 1.6)) {
-            if let idx = self.waves.firstIndex(where: { $0.id == id }) {
-                self.waves[idx].scale = maxScale
-                self.waves[idx].opacity = 0
+        // 下一 RunLoop 再启动动画，让 SwiftUI 先渲染初始状态（scale=1, opacity=0.6）
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 1.6)) {
+                if let idx = self.waves.firstIndex(where: { $0.id == id }) {
+                    self.waves[idx].scale = maxScale
+                    self.waves[idx].opacity = 0
+                }
             }
         }
 

@@ -1,5 +1,6 @@
 import SwiftUI
 @preconcurrency import Vision
+import VisionKit
 import Translation
 import NaturalLanguage
 import AVFoundation
@@ -89,13 +90,16 @@ struct ScanView: View {
     @State private var wordRegions:    [WordRegion] = []
     @State private var isProcessing:   Bool         = false
 
-    // Word definition
+    // Word definition (OCR mode)
     @State private var selectedWord:       String = ""
     @State private var definition:         String = ""
     @State private var showDefinition:     Bool   = false
     @State private var translatedSentence: String = ""
     @State private var isFetchingSentence: Bool   = false
     @State private var showCopiedToast:    Bool   = false
+
+    // Live Text mode (VisionKit)
+    @State private var isAnalyzingLiveText: Bool = false
 
     // Translation
     @State private var translatedText:     String = ""
@@ -179,10 +183,15 @@ struct ScanView: View {
             wordRegions    = []
             translatedText = ""
             selectedWord   = ""
+            guard mode == .ocr else { return }
             Task { await analyzeImage(image) }
         }
-        .onChange(of: mode) { _, _ in
+        .onChange(of: mode) { _, newMode in
             translatedText = ""
+            // 切换到扫描模式时，如果已有图片但还未 OCR，立即跑一次
+            if newMode == .ocr, let image = selectedImage, recognizedText.isEmpty {
+                Task { await analyzeImage(image) }
+            }
         }
         .translationTask(translationConfig) { session in
             translationSession = session
@@ -240,84 +249,37 @@ struct ScanView: View {
             .shadow(color: deepBlue.opacity(0.1), radius: 12, x: 0, y: 4)
     }
 
-    // MARK: - Tappable image card (识图 mode)
+    // MARK: - Live Text image card (识图 mode, VisionKit)
 
     private func tappableImageCard(_ image: UIImage) -> some View {
         let ratio = image.size.width / max(image.size.height, 1)
-        return Color.clear
-            .aspectRatio(ratio, contentMode: .fit)
-            .overlay(
-                GeometryReader { geo in
-                    ZStack(alignment: .topLeading) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .frame(width: geo.size.width, height: geo.size.height)
-
-                        // Tappable word overlays
-                        ForEach(wordRegions) { region in
-                            let vr = viewRect(region.rect, in: geo.size)
-                            Color.clear
-                                .frame(width: max(vr.width, 24), height: max(vr.height, 24))
-                                .contentShape(Rectangle())
-                                .background(
-                                    RoundedRectangle(cornerRadius: 3)
-                                        .fill(selectedWord == region.text
-                                              ? accentBlue.opacity(0.3)
-                                              : Color.clear)
-                                )
-                                .position(x: vr.midX, y: vr.midY)
-                                .onTapGesture { handleTap(region.text) }
-                        }
-
-                        // Loading overlay
-                        if isProcessing {
+        return VStack(spacing: 8) {
+            ScanLiveTextImageView(image: image, isAnalyzing: $isAnalyzingLiveText)
+                .aspectRatio(ratio, contentMode: .fit)
+                .overlay {
+                    if isAnalyzingLiveText {
+                        ZStack {
                             Color.black.opacity(0.25)
                             ProgressView().tint(.white)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-
-                        // Hint label
-                        if !wordRegions.isEmpty {
-                            VStack {
-                                Spacer()
-                                HStack {
-                                    Spacer()
-                                    Text("轻点文字即可查询")
-                                        .font(.caption2.weight(.medium))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 10).padding(.vertical, 5)
-                                        .background(Color.black.opacity(0.45))
-                                        .clipShape(Capsule())
-                                    Spacer()
-                                }
-                                .padding(.bottom, 10)
-                            }
                         }
                     }
                 }
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.6), lineWidth: 1))
-            .shadow(color: deepBlue.opacity(0.1), radius: 12, x: 0, y: 4)
-    }
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Color.white.opacity(0.6), lineWidth: 1))
+                .shadow(color: deepBlue.opacity(0.1), radius: 12, x: 0, y: 4)
 
-    /// Convert Vision normalized rect (origin bottom-left) → SwiftUI view coordinates.
-    /// Because the image fills the view exactly (matching aspect ratio), no letterbox offset needed.
-    private func viewRect(_ r: CGRect, in size: CGSize) -> CGRect {
-        CGRect(
-            x: r.minX * size.width,
-            y: (1 - r.maxY) * size.height,      // flip Y axis
-            width:  r.width  * size.width,
-            height: r.height * size.height
-        )
+            Text("长按文字可选择、复制、翻译")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
     }
 
     private var emptyPlaceholder: some View {
         VStack(spacing: 12) {
             Image(systemName: mode == .ocr ? "camera.viewfinder" : "text.viewfinder")
                 .font(.system(size: 44)).foregroundColor(accentBlue.opacity(0.45))
-            Text(mode == .ocr ? "拍照或从相册选取图片" : "选取图片，单击文字即可查询释义")
+            Text(mode == .ocr ? "拍照或从相册选取图片" : "选取图片，长按文字可选择、翻译")
                 .font(.subheadline).foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity).frame(height: 180)
@@ -622,6 +584,62 @@ struct ScanView: View {
         appearance.titleTextAttributes      = [.foregroundColor: blue]
         UINavigationBar.appearance().standardAppearance   = appearance
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
+    }
+}
+
+// MARK: - VisionKit Live Text (识图 mode)
+
+private struct ScanLiveTextImageView: UIViewRepresentable {
+
+    let image: UIImage
+    @Binding var isAnalyzing: Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UIImageView {
+        let iv = UIImageView()
+        iv.contentMode = .scaleAspectFit
+        iv.isUserInteractionEnabled = true
+        iv.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        iv.setContentHuggingPriority(.defaultLow, for: .vertical)
+        iv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        iv.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+
+        let interaction = ImageAnalysisInteraction()
+        iv.addInteraction(interaction)
+        context.coordinator.interaction = interaction
+        return iv
+    }
+
+    func updateUIView(_ iv: UIImageView, context: Context) {
+        iv.image = image
+        context.coordinator.analyzeIfNeeded(image: image, isAnalyzing: $isAnalyzing)
+    }
+
+    class Coordinator {
+        let analyzer = ImageAnalyzer()
+        var interaction: ImageAnalysisInteraction?
+        private var lastImage: UIImage?
+
+        func analyzeIfNeeded(image: UIImage, isAnalyzing: Binding<Bool>) {
+            guard image !== lastImage else { return }
+            lastImage = image
+            interaction?.analysis = nil
+            interaction?.preferredInteractionTypes = []
+
+            Task { @MainActor in
+                isAnalyzing.wrappedValue = true
+                defer { isAnalyzing.wrappedValue = false }
+                let config = ImageAnalyzer.Configuration([.text])
+                do {
+                    let analysis = try await analyzer.analyze(image, configuration: config)
+                    interaction?.analysis = analysis
+                    interaction?.preferredInteractionTypes = .textSelection
+                } catch {
+                    print("❌ Live Text 分析失败: \(error)")
+                }
+            }
+        }
     }
 }
 
