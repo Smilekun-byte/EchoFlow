@@ -1,7 +1,5 @@
 import SwiftUI
-import Vision
-import NaturalLanguage
-import AVFoundation
+@preconcurrency import Vision
 
 // MARK: - WordRegion
 
@@ -9,18 +7,6 @@ private struct WordRegion: Identifiable {
     let id   = UUID()
     let text: String
     let rect: CGRect   // Vision normalized coords: (0,0) = bottom-left
-}
-
-// MARK: - System dictionary wrapper
-
-private struct DictionaryView: UIViewControllerRepresentable {
-    let word: String
-
-    func makeUIViewController(context: Context) -> UIReferenceLibraryViewController {
-        UIReferenceLibraryViewController(term: word)
-    }
-
-    func updateUIViewController(_ vc: UIReferenceLibraryViewController, context: Context) {}
 }
 
 // MARK: - LiveTextView
@@ -31,21 +17,9 @@ struct LiveTextView: View {
 
     @State private var selectedImage:   UIImage?
     @State private var wordRegions:     [WordRegion] = []
-    @State private var recognizedText:  String = ""
     @State private var isProcessing:    Bool   = false
-    @State private var showImagePicker: Bool   = false
-
-    @State private var selectedWord:   String = ""
-    @State private var aiDefinition:   String = ""
-    @State private var showDefinition: Bool   = false
-
-    // Zoom & pan
-    @State private var imageScale:  CGFloat = 1.0
-    @State private var lastScale:   CGFloat = 1.0
-    @State private var imageOffset: CGSize  = .zero
-    @State private var lastOffset:  CGSize  = .zero
-
-    private static let synthesizer = AVSpeechSynthesizer()
+    @State private var showPhotoPicker: Bool   = false
+    @State private var showCamera:      Bool   = false
 
     private let accentBlue = Color(red: 0.231, green: 0.510, blue: 0.965)
     private let deepBlue   = Color(red: 0.172, green: 0.373, blue: 0.541)
@@ -69,9 +43,9 @@ struct LiveTextView: View {
                 background.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 20) {
-                        pickerButton
+                        pickerRow
                         if let img = selectedImage {
-                            tappableImageCard(img)
+                            imageCard(img)
                         } else {
                             emptyPlaceholder
                         }
@@ -85,135 +59,90 @@ struct LiveTextView: View {
             .navigationBarTitleDisplayMode(.large)
             .onAppear { applyTransparentNavBar() }
         }
-        .sheet(isPresented: $showImagePicker) {
-            LiveImagePicker(selectedImage: $selectedImage)
+        .sheet(isPresented: $showPhotoPicker) {
+            LiveImagePicker(sourceType: .photoLibrary, selectedImage: $selectedImage)
         }
-        .sheet(isPresented: $showDefinition) {
-            definitionSheet
+        .sheet(isPresented: $showCamera) {
+            LiveImagePicker(sourceType: .camera, selectedImage: $selectedImage)
         }
         .onChange(of: selectedImage) { _, image in
             guard let image else { return }
-            wordRegions = []; recognizedText = ""
-            imageScale  = 1.0; lastScale  = 1.0
-            imageOffset = .zero; lastOffset = .zero
+            wordRegions = []
             Task { await analyzeImage(image) }
         }
     }
 
-    // MARK: - Picker button
+    // MARK: - Picker row
 
-    private var pickerButton: some View {
-        Button { showImagePicker = true } label: {
-            Label("从相册选择", systemImage: "photo.on.rectangle")
-                .font(.subheadline.weight(.medium))
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(accentBlue)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    private var pickerRow: some View {
+        HStack(spacing: 12) {
+            Button { showPhotoPicker = true } label: {
+                Label("从相册选择", systemImage: "photo.on.rectangle")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(accentBlue)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+
+            Button { showCamera = true } label: {
+                Label("拍照", systemImage: "camera.fill")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(accentBlue)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(accentBlue.opacity(0.35), lineWidth: 1)
+                    )
+            }
+            .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
         }
     }
 
-    // MARK: - Tappable image card
+    // MARK: - Image card with bounding boxes
 
-    private func tappableImageCard(_ image: UIImage) -> some View {
+    private func imageCard(_ image: UIImage) -> some View {
         let ratio = image.size.width / max(image.size.height, 1)
-        return VStack(spacing: 8) {
-            Color.clear
-                .aspectRatio(ratio, contentMode: .fit)
-                .overlay(
-                    GeometryReader { geo in
-                        ZStack(alignment: .topLeading) {
-                            Image(uiImage: image)
-                                .resizable()
-                                .frame(width: geo.size.width, height: geo.size.height)
+        return Color.clear
+            .aspectRatio(ratio, contentMode: .fit)
+            .overlay(
+                GeometryReader { geo in
+                    ZStack(alignment: .topLeading) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .frame(width: geo.size.width, height: geo.size.height)
 
-                            ForEach(wordRegions) { region in
-                                let vr = viewRect(region.rect, in: geo.size)
-                                Color.clear
-                                    .frame(width: max(vr.width, 24), height: max(vr.height, 24))
-                                    .contentShape(Rectangle())
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 3)
-                                            .fill(selectedWord == region.text
-                                                  ? accentBlue.opacity(0.3)
-                                                  : Color.clear)
-                                    )
-                                    .position(x: vr.midX, y: vr.midY)
-                                    .onTapGesture { handleTap(region.text) }
-                            }
-
-                            if isProcessing {
-                                Color.black.opacity(0.2)
-                                ProgressView().tint(.white)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            }
-
-                            if !wordRegions.isEmpty {
-                                VStack {
-                                    Spacer()
-                                    Text("轻点文字即可查询")
-                                        .font(.caption2.weight(.medium))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 10).padding(.vertical, 5)
-                                        .background(Color.black.opacity(0.45))
-                                        .clipShape(Capsule())
-                                        .padding(.bottom, 10)
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
+                        ForEach(wordRegions) { region in
+                            let r = convertRect(region.rect, in: geo.size)
+                            Rectangle()
+                                .stroke(Color.blue, lineWidth: 1.5)
+                                .frame(width: r.width, height: r.height)
+                                .position(x: r.midX, y: r.midY)
                         }
-                        .scaleEffect(imageScale)
-                        .offset(imageOffset)
-                        .gesture(
-                            MagnificationGesture()
-                                .onChanged { value in
-                                    imageScale = max(1.0, min(lastScale * value, 5.0))
-                                }
-                                .onEnded { _ in
-                                    imageScale = max(1.0, min(imageScale, 5.0))
-                                    lastScale  = imageScale
-                                }
-                                .simultaneously(with:
-                                    DragGesture()
-                                        .onChanged { value in
-                                            imageOffset = CGSize(
-                                                width:  lastOffset.width  + value.translation.width,
-                                                height: lastOffset.height + value.translation.height
-                                            )
-                                        }
-                                        .onEnded { _ in
-                                            lastOffset = imageOffset
-                                        }
-                                )
-                        )
-                        .onTapGesture(count: 2) {
-                            withAnimation(.spring()) {
-                                imageScale  = 1.0
-                                lastScale   = 1.0
-                                imageOffset = .zero
-                                lastOffset  = .zero
-                            }
+
+                        if isProcessing {
+                            Color.black.opacity(0.2)
+                            ProgressView().tint(.white)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
                     }
-                    .clipped()
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.white.opacity(0.6), lineWidth: 1))
-                .shadow(color: deepBlue.opacity(0.1), radius: 12, x: 0, y: 4)
-
-            Text("双指缩放 · 双击还原")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.6), lineWidth: 1))
+            .shadow(color: deepBlue.opacity(0.1), radius: 12, x: 0, y: 4)
     }
 
-    /// Vision normalized rect (origin bottom-left) → SwiftUI view coordinates.
-    private func viewRect(_ r: CGRect, in size: CGSize) -> CGRect {
+    /// Vision 归一化坐标（左下原点）→ SwiftUI 视图坐标（左上原点）
+    private func convertRect(_ r: CGRect, in size: CGSize) -> CGRect {
         CGRect(
-            x: r.minX * size.width,
-            y: (1 - r.maxY) * size.height,
+            x:      r.minX * size.width,
+            y:      (1 - r.maxY) * size.height,
             width:  r.width  * size.width,
             height: r.height * size.height
         )
@@ -223,7 +152,7 @@ struct LiveTextView: View {
         VStack(spacing: 12) {
             Image(systemName: "text.viewfinder")
                 .font(.system(size: 44)).foregroundColor(accentBlue.opacity(0.45))
-            Text("选取图片，单击文字即可查询释义")
+            Text("选取图片，识别文字区域")
                 .font(.subheadline).foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity).frame(height: 180)
@@ -233,96 +162,25 @@ struct LiveTextView: View {
             .stroke(Color.white.opacity(0.6), lineWidth: 1))
     }
 
-    // MARK: - Definition sheet
-
-    private var definitionSheet: some View {
-        VStack(spacing: 0) {
-
-            // Word + speaker
-            HStack(alignment: .center) {
-                Text(selectedWord)
-                    .font(.title2.bold())
-                    .foregroundColor(.primary)
-                Spacer()
-                Button { speak(selectedWord) } label: {
-                    Image(systemName: "speaker.wave.2.fill")
-                        .font(.title3)
-                        .foregroundColor(accentBlue)
-                        .padding(8)
-                        .background(accentBlue.opacity(0.1))
-                        .clipShape(Circle())
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 16)
-
-            Divider().padding(.vertical, 8)
-
-            // System dictionary (main content)
-            DictionaryView(word: selectedWord)
-                .id(selectedWord)      // recreate VC when word changes
-                .frame(minHeight: 200)
-
-            Divider().padding(.vertical, 8)
-
-            // AI context (auxiliary)
-            VStack(alignment: .leading, spacing: 6) {
-                Label("AI 语境解释", systemImage: "sparkles")
-                    .font(.caption.weight(.medium))
-                    .foregroundColor(.secondary)
-
-                Group {
-                    if aiDefinition.isEmpty {
-                        Text("分析中…")
-                            .foregroundColor(.secondary.opacity(0.4))
-                    } else {
-                        Text(aiDefinition)
-                            .foregroundColor(.secondary)
-                            .transition(.opacity.animation(.easeIn(duration: 0.2)))
-                    }
-                }
-                .font(.caption)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 24)
-            .padding(.bottom, 20)
-        }
-        .presentationDetents([.fraction(0.55), .large])
-        .presentationDragIndicator(.visible)
-    }
-
-    // MARK: - Image analysis
+    // MARK: - OCR（observation 级别，保留行/块坐标）
 
     private func analyzeImage(_ image: UIImage) async {
         guard let cgImage = image.cgImage else { return }
-        let languages = ocrLanguages
         isProcessing = true
         defer { isProcessing = false }
 
-        let tokenizer = NLTokenizer(unit: .word)
+        let languages = ocrLanguages
 
-        let (text, regions): (String, [WordRegion]) = await withCheckedContinuation { continuation in
-            var lines:   [String]     = []
-            var regions: [WordRegion] = []
-
+        let regions: [WordRegion] = await withCheckedContinuation { continuation in
             let request = VNRecognizeTextRequest { req, _ in
-                defer { continuation.resume(returning: (lines.joined(separator: "\n"), regions)) }
-                guard let observations = req.results as? [VNRecognizedTextObservation] else { return }
-
-                for obs in observations {
-                    guard let candidate = obs.topCandidates(1).first else { continue }
-                    let line = candidate.string
-                    lines.append(line)
-
-                    tokenizer.string = line
-                    tokenizer.enumerateTokens(in: line.startIndex..<line.endIndex) { range, _ in
-                        let word = String(line[range])
-                        if let box = try? candidate.boundingBox(for: range) {
-                            regions.append(WordRegion(text: word, rect: box.boundingBox))
-                        }
-                        return true
-                    }
+                let observations = (req.results as? [VNRecognizedTextObservation]) ?? []
+                let result = observations.map { obs in
+                    WordRegion(
+                        text: obs.topCandidates(1).first?.string ?? "",
+                        rect: obs.boundingBox
+                    )
                 }
+                continuation.resume(returning: result)
             }
             request.recognitionLevel       = .accurate
             request.usesLanguageCorrection = true
@@ -331,12 +189,11 @@ struct LiveTextView: View {
             DispatchQueue.global(qos: .userInitiated).async {
                 let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
                 do    { try handler.perform([request]) }
-                catch { continuation.resume(returning: ("", [])) }
+                catch { continuation.resume(returning: []) }
             }
         }
 
-        recognizedText = text
-        wordRegions    = regions
+        wordRegions = regions
     }
 
     private var ocrLanguages: [String] {
@@ -348,56 +205,6 @@ struct LiveTextView: View {
         case "de":      return ["de-DE",    "en-US"]
         case "es":      return ["es-ES",    "en-US"]
         default:        return ["en-US"]
-        }
-    }
-
-    // MARK: - Tap handling
-
-    private func handleTap(_ word: String) {
-        withAnimation(.easeInOut(duration: 0.15)) { selectedWord = word }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        aiDefinition = ""
-        showDefinition = true
-        fetchAIDefinition(for: word)
-    }
-
-    private func fetchAIDefinition(for word: String) {
-        let sentence = extractSentence(containing: word, from: recognizedText)
-        Task {
-            let result = await DeepSeekService.shared.complete(
-                system: "一句话用中文解释词汇在当前语境下的含义，格式：在本文中：[解释]",
-                user:   "原句：\(sentence)\n查询词：\(word)"
-            )
-            await MainActor.run { withAnimation { aiDefinition = result } }
-        }
-    }
-
-    private func extractSentence(containing word: String, from text: String) -> String {
-        let sep = CharacterSet(charactersIn: "。！？.!?\n")
-        return text.components(separatedBy: sep).first { $0.contains(word) } ?? text
-    }
-
-    // MARK: - TTS with language detection
-
-    private func speak(_ word: String) {
-        let u = AVSpeechUtterance(string: word)
-        u.voice = AVSpeechSynthesisVoice(language: detectedLocale(for: word))
-        u.rate  = 0.4
-        LiveTextView.synthesizer.speak(u)
-    }
-
-    /// Uses NLLanguageRecognizer so Japanese words get a Japanese voice, English get English, etc.
-    private func detectedLocale(for text: String) -> String {
-        let rec = NLLanguageRecognizer()
-        rec.processString(text)
-        switch rec.dominantLanguage {
-        case .simplifiedChinese, .traditionalChinese: return "zh-CN"
-        case .japanese:  return "ja-JP"
-        case .korean:    return "ko-KR"
-        case .french:    return "fr-FR"
-        case .german:    return "de-DE"
-        case .spanish:   return "es-ES"
-        default:         return "en-US"
         }
     }
 
@@ -416,6 +223,7 @@ struct LiveTextView: View {
 // MARK: - Image Picker
 
 private struct LiveImagePicker: UIViewControllerRepresentable {
+    let sourceType: UIImagePickerController.SourceType
     @Binding var selectedImage: UIImage?
     @Environment(\.dismiss) private var dismiss
 
@@ -423,7 +231,7 @@ private struct LiveImagePicker: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
-        picker.sourceType = .photoLibrary
+        picker.sourceType = sourceType
         picker.delegate   = context.coordinator
         return picker
     }

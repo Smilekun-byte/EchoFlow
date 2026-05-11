@@ -1,5 +1,5 @@
 import SwiftUI
-import Vision
+@preconcurrency import Vision
 import Translation
 import NaturalLanguage
 import AVFoundation
@@ -643,7 +643,7 @@ private struct ScanSelectableTextView: UIViewRepresentable {
         if tv.text != text { tv.text = text }
     }
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
-        let w = proposal.width ?? UIScreen.main.bounds.width - 64
+        let w = proposal.width ?? 320
         let sz = uiView.sizeThatFits(CGSize(width: w, height: .greatestFiniteMagnitude))
         return CGSize(width: w, height: max(100, sz.height))
     }
