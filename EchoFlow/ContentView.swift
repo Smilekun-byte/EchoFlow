@@ -39,7 +39,6 @@ struct ContentView: View {
     @AppStorage("autoTranslate")      private var autoTranslate      = true
     @AppStorage("translationEngine")  private var translationEngine  = "apple"
 
-    @Namespace private var engineNS
     @Environment(\.colorScheme) private var colorScheme
 
     var currentTranscript: String {
@@ -70,7 +69,6 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     title
-                    enginePicker
                     languageSelector
                     transcriptCard
                     translationCard
@@ -153,36 +151,6 @@ struct ContentView: View {
         Text("共鳴")
             .font(.system(.title, design: .rounded, weight: .semibold))
             .foregroundColor(deepBlue)
-    }
-
-    private var enginePicker: some View {
-        HStack(spacing: 0) {
-            engineTab("Deepgram", selected: useDeepgram)  { useDeepgram = true  }
-            engineTab("Apple",    selected: !useDeepgram) { useDeepgram = false }
-        }
-        .padding(4)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
-    }
-
-    private func engineTab(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { action() }
-        }) {
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundColor(selected ? deepBlue : .secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background {
-                    if selected {
-                        Capsule()
-                            .fill(Color.white.opacity(0.9))
-                            .matchedGeometryEffect(id: "engineSlider", in: engineNS)
-                    }
-                }
-        }
-        .buttonStyle(.plain)
     }
 
     private var languageSelector: some View {
@@ -269,7 +237,7 @@ struct ContentView: View {
                         } else if showRetranslated {
                             Label("已重新翻译", systemImage: "arrow.counterclockwise")
                         } else {
-                            Text(useDeepgram ? "Deepgram" : "Apple")
+                            Text("Apple")
                         }
                     }
                     .font(.caption2.weight(.semibold))
@@ -386,19 +354,16 @@ struct ContentView: View {
                     .opacity(p.opacity)
             }
 
-            // 波纹层
+            // 波纹层：三段 86° 弧线，随扩散旋转
             ForEach(waves) { wave in
-                Circle()
-                    .stroke(
-                        Color(
-                            red:   0.2 + Double(wave.scale) * 0.1,
-                            green: 0.5 + Double(wave.scale) * 0.1,
-                            blue:  0.9
-                        ),
-                        lineWidth: max(0.3, 2.5 - wave.scale * 0.5)
-                    )
+                ThreeArcRing()
+                    .stroke(wave.color,
+                            style: StrokeStyle(
+                                lineWidth: max(0.5, 4.5 - wave.scale * 0.85),
+                                lineCap: .round))
                     .frame(width: 72 * wave.scale, height: 72 * wave.scale)
                     .opacity(wave.opacity)
+                    .rotationEffect(.degrees(wave.rotation))
             }
 
             // 麦克风按钮
@@ -407,15 +372,15 @@ struct ContentView: View {
                     .fill(isRecording ? AnyShapeStyle(accentBlue) : AnyShapeStyle(.ultraThinMaterial))
                     .frame(width: 72, height: 72)
                     .shadow(
-                        color: isRecording ? accentBlue.opacity(0.45) : accentBlue.opacity(0.15),
-                        radius: isRecording ? 16 : 10
+                        color: isRecording ? accentBlue.opacity(0.7) : accentBlue.opacity(0.15),
+                        radius: isRecording ? 28 : 10
                     )
 
                 Image(systemName: isRecording ? "mic.fill" : "mic")
                     .font(.system(size: 28, weight: .medium))
                     .foregroundColor(isRecording ? .white : accentBlue)
             }
-            .scaleEffect(isRecording ? 1.0 + CGFloat(audioManager.currentRMS) * 0.15 : 1.0)
+            .scaleEffect(isRecording ? 1.0 + CGFloat(audioManager.currentRMS) * 0.4 : 1.0)
             .animation(.easeInOut(duration: 0.1), value: audioManager.currentRMS)
             .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isRecording)
             .gesture(
@@ -542,28 +507,43 @@ struct ContentView: View {
 
     private func triggerParticleBurst() {
         let colors: [Color] = [
-            Color(red: 0.2, green: 0.5, blue: 0.9),
-            Color(red: 0.4, green: 0.7, blue: 1.0),
-            Color(red: 0.6, green: 0.85, blue: 1.0)
+            Color(red: 0.2,  green: 0.5,  blue: 0.95),
+            Color(red: 0.1,  green: 0.7,  blue: 1.0),
+            Color(red: 0.5,  green: 0.3,  blue: 1.0),
+            Color(red: 0.0,  green: 0.85, blue: 1.0),
+            Color(red: 0.6,  green: 0.85, blue: 1.0)
         ]
-        particles = (0..<40).map { _ in
+        particles = (0..<70).map { _ in
             Particle(
-                angle:  Double.random(in: 0..<360),
-                speed:  Double.random(in: 0.8...2.0),
-                size:   CGFloat.random(in: 2...5),
-                opacity: Double.random(in: 0.6...1.0),
-                color:  colors.randomElement()!
+                angle:   Double.random(in: 0..<360),
+                speed:   Double.random(in: 1.8...4.0),
+                size:    CGFloat.random(in: 3...8),
+                opacity: Double.random(in: 0.75...1.0),
+                color:   colors.randomElement()!
             )
         }
-        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+
+        // 随粒子扩散（scale 增大）衰减的三段触觉：
+        //   t=0    scale≈1.0  → heavy  1.0  （按下瞬间，最强冲击）
+        //   t=150ms scale≈中  → medium 0.60 （粒子扩散中段）
+        //   t=400ms scale≈末  → soft   0.25 （粒子消散边缘）
+        let gen = UIImpactFeedbackGenerator(style: .heavy)
+        gen.prepare()
+        gen.impactOccurred(intensity: 1.0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.60)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.40) {
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.25)
+        }
 
         // 下一个 RunLoop 再启动动画：让 SwiftUI 先渲染粒子的初始位置（center），
         // 否则创建与动画在同一帧会被合并，粒子直接跳到终态而看不到爆发过程。
         DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: 0.8)) {
+            withAnimation(.easeOut(duration: 0.65)) {
                 for i in self.particles.indices {
                     let rad = self.particles[i].angle * .pi / 180
-                    let dist = CGFloat(self.particles[i].speed * 80)
+                    let dist = CGFloat(self.particles[i].speed * 140)
                     self.particles[i].x = cos(rad) * dist
                     self.particles[i].y = sin(rad) * dist
                     self.particles[i].opacity = 0
@@ -571,7 +551,7 @@ struct ContentView: View {
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
             self.particles = []
             self.startWaveAnimation()
         }
@@ -581,31 +561,44 @@ struct ContentView: View {
 
     private func startWaveAnimation() {
         guard isRecording else { return }
-        let interval = max(0.15, 0.4 - Double(audioManager.currentRMS) * 0.25)
-        waveTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+        waveTimer = Timer.scheduledTimer(withTimeInterval: 0.28, repeats: true) { _ in
             self.addWave()
         }
     }
 
+    private static let waveColors: [Color] = [
+        Color(red: 0.231, green: 0.510, blue: 0.965),
+        Color(red: 0.1,   green: 0.72,  blue: 1.0),
+        Color(red: 0.45,  green: 0.28,  blue: 1.0),
+        Color(red: 0.0,   green: 0.82,  blue: 0.98)
+    ]
+
     private func addWave() {
         let rms = audioManager.currentRMS
-        let maxScale = CGFloat(1.2 + Double(rms) * 3.0)
-        let wave = WaveRing()
-        waves.append(wave)
-        let id = wave.id
+        // 每次吐出 3 层错位波纹
+        for i in 0..<3 {
+            let delay = Double(i) * 0.07
+            let color = ContentView.waveColors[i % ContentView.waveColors.count]
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                let maxScale = CGFloat(2.2 + Double(rms) * 5.0)
+                var wave = WaveRing()
+                wave.color = color
+                self.waves.append(wave)
+                let id = wave.id
 
-        // 下一 RunLoop 再启动动画，让 SwiftUI 先渲染初始状态（scale=1, opacity=0.6）
-        DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: 1.6)) {
-                if let idx = self.waves.firstIndex(where: { $0.id == id }) {
-                    self.waves[idx].scale = maxScale
-                    self.waves[idx].opacity = 0
+                // 下一 RunLoop 再启动动画，让 SwiftUI 先渲染初始状态（scale=1, opacity=0.85）
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.95)) {
+                        if let idx = self.waves.firstIndex(where: { $0.id == id }) {
+                            self.waves[idx].scale = maxScale
+                            self.waves[idx].opacity = 0
+                        }
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    self.waves.removeAll { $0.id == id }
                 }
             }
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.65) {
-            self.waves.removeAll { $0.id == id }
         }
     }
 
@@ -614,8 +607,10 @@ struct ContentView: View {
     private func stopRecordingAnimation() {
         waveTimer?.invalidate()
         waveTimer = nil
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         // 已有波纹继续播放直到自然消失
+        let gen = UIImpactFeedbackGenerator(style: .medium)
+        gen.prepare()
+        gen.impactOccurred(intensity: 1.0)
     }
 }
 
@@ -624,7 +619,10 @@ struct ContentView: View {
 private struct WaveRing: Identifiable {
     let id = UUID()
     var scale: CGFloat = 1.0
-    var opacity: Double = 0.6
+    var opacity: Double = 0.85
+    var color: Color    = Color(red: 0.231, green: 0.510, blue: 0.965)
+    // 每个波纹的随机初始旋转角，让三段弧线错落不重叠
+    var rotation: Double = Double.random(in: 0..<120)
 }
 
 // MARK: - Particle
@@ -638,4 +636,28 @@ private struct Particle: Identifiable {
     var size: CGFloat
     var opacity: Double
     var color: Color
+}
+
+// MARK: - Three Arc Ring Shape
+
+/// 三段等间距弧线，每段跨度 86°，中心间隔 120°。
+/// 替代全圆让波纹更有张力、更具视觉层次。
+private struct ThreeArcRing: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        // 三段弧：起始角 0°、120°、240°，各画 86°（留 34° 间隙）
+        for i in 0..<3 {
+            let base  = Double(i) * 120.0
+            let start = Angle.degrees(base - 43.0)
+            let end   = Angle.degrees(base + 43.0)
+            path.addArc(center: center,
+                        radius: radius,
+                        startAngle: start,
+                        endAngle: end,
+                        clockwise: false)
+        }
+        return path
+    }
 }

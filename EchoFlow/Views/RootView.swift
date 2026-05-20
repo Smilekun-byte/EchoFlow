@@ -21,11 +21,11 @@ struct RootView: View {
             HistoryView()
                 .tabItem { Label("历史", systemImage: "clock.fill") }
 
+            ImageLiveTextViewer()
+                .tabItem { Label("识图", systemImage: "photo.circle.fill") }
+
             FolderView()
                 .tabItem { Label("文件夹", systemImage: "folder.fill") }
-
-            ScanView()
-                .tabItem { Label("扫描", systemImage: "camera.viewfinder") }
 
             SettingsView()
                 .tabItem { Label("设置", systemImage: "gear") }
