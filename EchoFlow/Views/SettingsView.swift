@@ -22,7 +22,8 @@ struct SettingsView: View {
 
     // MARK: - State
 
-    @State private var showClearAlert = false
+    @State private var showClearAlert   = false
+    @State private var showRestartAlert = false
     @Environment(\.modelContext) private var modelContext
     @Query private var allRecords: [ConversationRecord]
 
@@ -69,6 +70,14 @@ struct SettingsView: View {
             }
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.large)
+            .alert("语言已更改", isPresented: $showRestartAlert) {
+                Button("稍后重启", role: .cancel) {}
+                Button("立即重启", role: .destructive) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exit(0) }
+                }
+            } message: {
+                Text("重启 App 后新语言将生效")
+            }
             .onAppear {
                 let appearance = UINavigationBarAppearance()
                 appearance.configureWithTransparentBackground()
@@ -226,9 +235,19 @@ struct SettingsView: View {
                     Text("跟随系统").tag("system")
                     Text("简体中文").tag("zh-Hans")
                     Text("English").tag("en")
+                    Text("日本語").tag("ja")
                 }
                 .pickerStyle(.menu)
                 .tint(accentBlue)
+                .onChange(of: interfaceLanguage) { _, newValue in
+                    if newValue == "system" {
+                        UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+                    } else {
+                        UserDefaults.standard.set([newValue], forKey: "AppleLanguages")
+                    }
+                    UserDefaults.standard.synchronize()
+                    showRestartAlert = true
+                }
             }
         }
     }
@@ -299,7 +318,7 @@ struct SettingsView: View {
 
     // MARK: - Helpers
 
-    private func section<Content: View>(header: String, @ViewBuilder content: () -> Content) -> some View {
+    private func section<Content: View>(header: LocalizedStringKey, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(header)
                 .font(.caption.weight(.semibold))
@@ -320,7 +339,7 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
-    private func row<Trailing: View>(icon: String, label: String, @ViewBuilder trailing: () -> Trailing) -> some View {
+    private func row<Trailing: View>(icon: String, label: LocalizedStringKey, @ViewBuilder trailing: () -> Trailing) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .foregroundColor(accentBlue)
@@ -341,7 +360,7 @@ struct SettingsView: View {
     private func languagePicker(selection: Binding<String>) -> some View {
         Picker("", selection: selection) {
             ForEach(languages, id: \.code) { lang in
-                Text(lang.name).tag(lang.code)
+                Text(LocalizedStringKey(lang.name)).tag(lang.code)
             }
         }
         .pickerStyle(.menu)
