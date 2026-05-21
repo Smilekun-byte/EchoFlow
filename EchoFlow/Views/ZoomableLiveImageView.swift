@@ -309,7 +309,6 @@ extension _ZoomScrollBridge {
         }
 
         // 串行分析：先让 ImageAnalyzer 跑完，确认有文字后再起 Vision OCR
-        // 这样避免对没有文字的图片做无效识别，也共享了「是否含文字」的判断
         func analyzeForLiveText(_ image: UIImage) {
             guard image !== analyzedImage else { return }
             analyzedImage = image
@@ -322,53 +321,90 @@ extension _ZoomScrollBridge {
                     do {
                         let analysis = try await analyzer.analyze(image, configuration: config)
                         await MainActor.run { interaction.analysis = analysis }
-
-                        // 阶段 2：仅当 Live Text 确认含文字时才启 Vision OCR
-                        // 避免对无文字图片做重复识别
-                        guard analysis.hasResults(for: .text)
-                        else { return }
+                        guard analysis.hasResults(for: .text) else { return }
                     } catch {
                         print("⚠️ Live Text 分析失败: \(error.localizedDescription)")
-                        // Live Text 失败时仍尝试 Vision OCR（设备不支持或分析出错）
                     }
                 }
 
                 // ── 阶段 2：Vision OCR → 提取全文供 AI 分析 ──────────────────
-                // Apple 不对外暴露 ImageAnalysis 内部文字，VNRecognizeTextRequest
-                // 是唯一公开的程序化文字提取路径
                 guard let cgImage = image.cgImage else { return }
                 let request = VNRecognizeTextRequest { [weak self] req, _ in
                     guard let self else { return }
-                    let observations = (req.results as? [VNRecognizedTextObservation]) ?? []
+                    let obs = (req.results as? [VNRecognizedTextObservation]) ?? []
+                    guard !obs.isEmpty else { return }
 
-                    // Vision 坐标系原点在左下角，minY 越大越靠图片顶部
-                    // 按从上到下排序保证阅读顺序正确
-                    let sorted = observations.sorted { $0.boundingBox.minY > $1.boundingBox.minY }
+                    // Vision 坐标系：原点左下角，Y 向上。midY 越大越靠图片顶部。
+                    // Step 1：按 midY 降序初排（上→下）
+                    let sorted = obs.sorted { $0.boundingBox.midY > $1.boundingBox.midY }
 
-                    // 按纵向间距分段：间距 > 行高约 1.5 倍时视为新段落
+                    // Step 2：将 midY 相近的 observation 合并为同一视觉行
+                    var lines: [[VNRecognizedTextObservation]] = []
+                    for o in sorted {
+                        let h = max(o.boundingBox.height, 0.02)
+                        if let last = lines.last?.first,
+                           abs(last.boundingBox.midY - o.boundingBox.midY) < h * 0.7 {
+                            lines[lines.count - 1].append(o)
+                        } else {
+                            lines.append([o])
+                        }
+                    }
+
+                    // Step 3：同行内按 minX 从左到右排序
+                    lines = lines.map { $0.sorted { $0.boundingBox.minX < $1.boundingBox.minX } }
+
+                    // Step 4：合并行文字；根据内容判断 CJK / Latin 决定是否加空格
+                    func isCJKDominant(_ s: String) -> Bool {
+                        let cjk = s.unicodeScalars.filter {
+                            ($0.value >= 0x4E00 && $0.value <= 0x9FFF) ||
+                            ($0.value >= 0x3040 && $0.value <= 0x30FF) ||
+                            ($0.value >= 0xAC00 && $0.value <= 0xD7AF)
+                        }.count
+                        return cjk > s.unicodeScalars.count / 3
+                    }
+
+                    struct Line { let text: String; let minY: CGFloat; let maxY: CGFloat }
+                    let lineTexts: [Line] = lines.compactMap { group in
+                        let parts = group.compactMap { $0.topCandidates(1).first?.string }
+                                         .filter { !$0.isEmpty }
+                        guard !parts.isEmpty else { return nil }
+                        let joined = parts.joined()
+                        let sep    = isCJKDominant(joined) ? "" : " "
+                        let minY   = group.map { $0.boundingBox.minY }.min() ?? 0
+                        let maxY   = group.map { $0.boundingBox.maxY }.max() ?? 0
+                        return Line(text: parts.joined(separator: sep), minY: minY, maxY: maxY)
+                    }
+
+                    // Step 5：按行间距分段——间距 > 行高 2 倍才算新段落
                     var paragraphs: [[String]] = [[]]
                     var prevMinY: CGFloat = -1
-                    var prevHeight: CGFloat = 0.03
-                    for obs in sorted {
-                        let gap = prevMinY >= 0 ? abs(prevMinY - obs.boundingBox.minY) : 0
-                        if gap > prevHeight * 1.5 { paragraphs.append([]) }
-                        if let str = obs.topCandidates(1).first?.string, !str.isEmpty {
-                            paragraphs[paragraphs.count - 1].append(str)
+                    var prevHeight: CGFloat = 0.04
+                    for line in lineTexts {
+                        let lineH = max(line.maxY - line.minY, 0.02)
+                        if prevMinY >= 0 {
+                            // prevMinY 是上一行底边；line.maxY 是本行顶边
+                            let gap = prevMinY - line.maxY
+                            if gap > prevHeight * 2.0 { paragraphs.append([]) }
                         }
-                        prevMinY   = obs.boundingBox.minY
-                        prevHeight = obs.boundingBox.height
+                        paragraphs[paragraphs.count - 1].append(line.text)
+                        prevMinY   = line.minY
+                        prevHeight = lineH
                     }
 
                     let text = paragraphs
-                        .compactMap { $0.isEmpty ? nil : $0.joined(separator: " ") }
+                        .compactMap { $0.isEmpty ? nil : $0.joined(separator: "\n") }
                         .joined(separator: "\n\n")
                     guard !text.isEmpty else { return }
                     DispatchQueue.main.async { self.onTextExtracted?(text) }
                 }
                 request.recognitionLevel       = .accurate
                 request.usesLanguageCorrection = true
-                // 明确语言优先级，防止中日韩字符被识别成 Latin 乱码
-                request.recognitionLanguages   = ["zh-Hans", "zh-Hant", "ja", "ko", "en-US"]
+                request.minimumTextHeight      = 0.015   // 低于默认值，捕获小字号
+                if #available(iOS 16, *) {
+                    // 自动检测语言，混排文档识别更准确
+                    request.automaticallyDetectsLanguage = true
+                }
+                request.recognitionLanguages = ["zh-Hans", "zh-Hant", "ja", "ko", "en-US"]
 
                 DispatchQueue.global(qos: .userInitiated).async {
                     try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])

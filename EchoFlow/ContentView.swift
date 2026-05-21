@@ -316,14 +316,37 @@ struct ContentView: View {
     private var translationCard: some View {
         glassCard {
             VStack(alignment: .leading, spacing: 10) {
-                Text("译文")
-                    .font(.caption.weight(.medium))
-                    .foregroundColor(.secondary)
+                HStack {
+                    Text("译文")
+                        .font(.caption.weight(.medium))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    if !translatedText.isEmpty {
+                        Button {
+                            UIPasteboard.general.string = translatedText
+                            let generator = UIImpactFeedbackGenerator(style: .light)
+                            generator.impactOccurred()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.caption2.weight(.semibold))
+                                Text("复制")
+                                    .font(.caption2.weight(.semibold))
+                            }
+                            .foregroundColor(accentBlue)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(accentBlue.opacity(0.12))
+                            .clipShape(Capsule())
+                        }
+                    }
+                }
                 ScrollView {
                     Text(translatedText.isEmpty ? "翻译结果..." : translatedText)
                         .font(.body)
                         .foregroundColor(translatedText.isEmpty ? .secondary.opacity(0.6) : .primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
                 }
                 .frame(minHeight: 100)
             }
