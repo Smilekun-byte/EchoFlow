@@ -308,39 +308,71 @@ extension _ZoomScrollBridge {
             }
         }
 
-        // 双轨并行分析：VisionKit 驱动 Live Text UI，Vision OCR 提取文本供 AI 分析 ──
+        // 串行分析：先让 ImageAnalyzer 跑完，确认有文字后再起 Vision OCR
+        // 这样避免对没有文字的图片做无效识别，也共享了「是否含文字」的判断
         func analyzeForLiveText(_ image: UIImage) {
             guard image !== analyzedImage else { return }
             analyzedImage = image
 
-            // ── 轨道 1：ImageAnalyzer → Live Text 交互层（选词、查询、数据检测）──
-            if ImageAnalyzer.isSupported, let interaction {
-                Task {
+            Task {
+                // ── 阶段 1：ImageAnalyzer → Live Text 交互层 ──────────────────
+                if ImageAnalyzer.isSupported, let interaction {
                     let analyzer = ImageAnalyzer()
                     let config   = ImageAnalyzer.Configuration([.text, .machineReadableCode])
                     do {
                         let analysis = try await analyzer.analyze(image, configuration: config)
                         await MainActor.run { interaction.analysis = analysis }
+
+                        // 阶段 2：仅当 Live Text 确认含文字时才启 Vision OCR
+                        // 避免对无文字图片做重复识别
+                        guard analysis.hasResults(for: ImageAnalyzer.Configuration([.text]))
+                        else { return }
                     } catch {
                         print("⚠️ Live Text 分析失败: \(error.localizedDescription)")
+                        // Live Text 失败时仍尝试 Vision OCR（设备不支持或分析出错）
                     }
                 }
-            }
 
-            // ── 轨道 2：VNRecognizeTextRequest → 提取全文，供 AI 分析按钮使用 ──
-            guard let cgImage = image.cgImage else { return }
-            let request = VNRecognizeTextRequest { [weak self] req, _ in
-                guard let self else { return }
-                let lines = (req.results as? [VNRecognizedTextObservation])?
-                    .compactMap { $0.topCandidates(1).first?.string } ?? []
-                let text = lines.joined(separator: "\n")
-                guard !text.isEmpty else { return }
-                DispatchQueue.main.async { self.onTextExtracted?(text) }
-            }
-            request.recognitionLevel       = .accurate
-            request.usesLanguageCorrection = true
-            DispatchQueue.global(qos: .userInitiated).async {
-                try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+                // ── 阶段 2：Vision OCR → 提取全文供 AI 分析 ──────────────────
+                // Apple 不对外暴露 ImageAnalysis 内部文字，VNRecognizeTextRequest
+                // 是唯一公开的程序化文字提取路径
+                guard let cgImage = image.cgImage else { return }
+                let request = VNRecognizeTextRequest { [weak self] req, _ in
+                    guard let self else { return }
+                    let observations = (req.results as? [VNRecognizedTextObservation]) ?? []
+
+                    // Vision 坐标系原点在左下角，minY 越大越靠图片顶部
+                    // 按从上到下排序保证阅读顺序正确
+                    let sorted = observations.sorted { $0.boundingBox.minY > $1.boundingBox.minY }
+
+                    // 按纵向间距分段：间距 > 行高约 1.5 倍时视为新段落
+                    var paragraphs: [[String]] = [[]]
+                    var prevMinY: CGFloat = -1
+                    var prevHeight: CGFloat = 0.03
+                    for obs in sorted {
+                        let gap = prevMinY >= 0 ? abs(prevMinY - obs.boundingBox.minY) : 0
+                        if gap > prevHeight * 1.5 { paragraphs.append([]) }
+                        if let str = obs.topCandidates(1).first?.string, !str.isEmpty {
+                            paragraphs[paragraphs.count - 1].append(str)
+                        }
+                        prevMinY   = obs.boundingBox.minY
+                        prevHeight = obs.boundingBox.height
+                    }
+
+                    let text = paragraphs
+                        .compactMap { $0.isEmpty ? nil : $0.joined(separator: " ") }
+                        .joined(separator: "\n\n")
+                    guard !text.isEmpty else { return }
+                    DispatchQueue.main.async { self.onTextExtracted?(text) }
+                }
+                request.recognitionLevel       = .accurate
+                request.usesLanguageCorrection = true
+                // 明确语言优先级，防止中日韩字符被识别成 Latin 乱码
+                request.recognitionLanguages   = ["zh-Hans", "zh-Hant", "ja", "ko", "en-US"]
+
+                DispatchQueue.global(qos: .userInitiated).async {
+                    try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+                }
             }
         }
     }
