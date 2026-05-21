@@ -19,6 +19,9 @@ struct SettingsView: View {
     @AppStorage("recordRetention")        private var recordRetention        = "forever"
     @AppStorage("appearanceMode")         private var appearanceMode         = "system"
     @AppStorage("interfaceLanguage")      private var interfaceLanguage      = "system"
+    @AppStorage("aiPrompt_zh")            private var aiPromptZh             = SettingsView.defaultPromptZh
+    @AppStorage("aiPrompt_en")            private var aiPromptEn             = SettingsView.defaultPromptEn
+    @AppStorage("aiPrompt_ja")            private var aiPromptJa             = SettingsView.defaultPromptJa
 
     // MARK: - State
 
@@ -58,6 +61,7 @@ struct SettingsView: View {
                     VStack(spacing: 22) {
                         engineSection
                         translationSection
+                        aiPromptSection
                         audioSection
                         historySection
                         appearanceSection
@@ -146,6 +150,21 @@ struct SettingsView: View {
                     key: $deepseekAPIKey
                 )
             }
+        }
+    }
+
+    private var aiPromptSection: some View {
+        section(header: "🤖 AI 分析") {
+            NavigationLink {
+                PromptEditorView(promptZh: $aiPromptZh, promptEn: $aiPromptEn, promptJa: $aiPromptJa)
+            } label: {
+                row(icon: "text.bubble", label: "分析提示词") {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -397,5 +416,108 @@ struct SettingsView: View {
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+    }
+
+    // MARK: - Default AI prompts (one per interface language)
+
+    static let defaultPromptZh = """
+        你是一个专业的语言与内容分析助手。根据用户提供的文本，视内容性质提供：
+        1. 核心含义或词义解释（简洁）
+        2. 翻译（若为外文）
+        3. 关键信息提取（若为长段落）
+        用中文回复，简洁有力，不超过 200 字。
+        """
+
+    static let defaultPromptEn = """
+        You are a professional language and content analysis assistant. Based on the provided text:
+        1. Explain the core meaning or definition (concise)
+        2. Translate (if foreign language)
+        3. Extract key information (if a long paragraph)
+        Reply in English, concisely, within 200 words.
+        """
+
+    static let defaultPromptJa = """
+        あなたはプロの言語・コンテンツ分析アシスタントです。提供されたテキストに応じて：
+        1. 核心的な意味または語義の説明（簡潔に）
+        2. 翻訳（外国語の場合）
+        3. 重要情報の抽出（長い段落の場合）
+        日本語で簡潔に、200字以内でお答えください。
+        """
+}
+
+// MARK: - Prompt Editor View
+
+private struct PromptEditorView: View {
+
+    @Binding var promptZh: String
+    @Binding var promptEn: String
+    @Binding var promptJa: String
+
+    @State private var selected = 0
+
+    @Environment(\.colorScheme) private var colorScheme
+    private let deepBlue   = Color(red: 0.172, green: 0.373, blue: 0.541)
+    private let accentBlue = Color(red: 0.231, green: 0.510, blue: 0.965)
+
+    private var background: LinearGradient {
+        colorScheme == .dark
+            ? LinearGradient(colors: [Color(red: 0.08, green: 0.13, blue: 0.22),
+                                      Color(red: 0.04, green: 0.07, blue: 0.14)],
+                             startPoint: .top, endPoint: .bottom)
+            : LinearGradient(colors: [Color(red: 0.910, green: 0.957, blue: 0.992),
+                                      Color(red: 0.722, green: 0.831, blue: 0.929)],
+                             startPoint: .top, endPoint: .bottom)
+    }
+
+    private var langs: [(label: String, binding: Binding<String>, default: String)] {[
+        ("中文",    $promptZh, SettingsView.defaultPromptZh),
+        ("English", $promptEn, SettingsView.defaultPromptEn),
+        ("日本語",  $promptJa, SettingsView.defaultPromptJa),
+    ]}
+
+    var body: some View {
+        ZStack {
+            background.ignoresSafeArea()
+            VStack(spacing: 16) {
+                Picker("", selection: $selected) {
+                    ForEach(langs.indices, id: \.self) { i in
+                        Text(langs[i].label).tag(i)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+
+                Text("自定义发送给 AI 的系统指令")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+
+                TextEditor(text: langs[selected].binding)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(12)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.white.opacity(0.6), lineWidth: 1)
+                    )
+                    .padding(.horizontal)
+
+                Spacer()
+            }
+            .padding(.top, 16)
+        }
+        .navigationTitle("分析提示词")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("恢复默认") {
+                    langs[selected].binding.wrappedValue = langs[selected].default
+                }
+                .disabled(langs[selected].binding.wrappedValue == langs[selected].default)
+            }
+        }
     }
 }

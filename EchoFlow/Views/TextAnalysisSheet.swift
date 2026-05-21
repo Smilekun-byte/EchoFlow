@@ -43,7 +43,25 @@ struct TextAnalysisSheet: View {
     @State private var isAnalyzing:  Bool   = false
     @State private var lookUpTerm:   String?        // 非 nil 时弹出本地词典
 
+    @AppStorage("interfaceLanguage") private var interfaceLanguage = "system"
+    @AppStorage("aiPrompt_zh")       private var aiPromptZh        = SettingsView.defaultPromptZh
+    @AppStorage("aiPrompt_en")       private var aiPromptEn        = SettingsView.defaultPromptEn
+    @AppStorage("aiPrompt_ja")       private var aiPromptJa        = SettingsView.defaultPromptJa
+
     @Environment(\.dismiss) private var dismiss
+
+    private var activePrompt: String {
+        switch interfaceLanguage {
+        case "en": return aiPromptEn
+        case "ja": return aiPromptJa
+        case "zh-Hans": return aiPromptZh
+        default:
+            let code = Locale.current.language.languageCode?.identifier ?? "zh"
+            if code == "en" { return aiPromptEn }
+            if code == "ja" { return aiPromptJa }
+            return aiPromptZh
+        }
+    }
 
     private let accentBlue = Color(red: 0.231, green: 0.510, blue: 0.965)
     private let deepBlue   = Color(red: 0.172, green: 0.373, blue: 0.541)
@@ -208,13 +226,7 @@ struct TextAnalysisSheet: View {
         aiResult    = ""
         Task {
             let result = await DeepSeekService.shared.complete(
-                system: """
-                你是一个专业的语言与内容分析助手。根据用户提供的文本，视内容性质提供：
-                1. 核心含义或词义解释（中文，简洁）
-                2. 翻译（若为外文）
-                3. 关键信息提取（若为长段落）
-                用中文回复，简洁有力，不超过 200 字。
-                """,
+                system: activePrompt,
                 user: text
             )
             await MainActor.run {
