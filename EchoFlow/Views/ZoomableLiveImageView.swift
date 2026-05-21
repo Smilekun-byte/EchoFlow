@@ -28,7 +28,6 @@ struct ImageLiveTextViewer: View {
                 if let image {
                     // 核心组件：可缩放 + Live Text
                     ZoomableLiveImageView(image: image)
-                        .ignoresSafeArea(edges: .bottom)
                 } else {
                     emptyState
                 }
@@ -114,9 +113,12 @@ struct ZoomableLiveImageView: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             // 核心：缩放 + Live Text
+            // .ignoresSafeArea() 仅作用于 ScrollView 本身，让图片延伸到全屏（含 Tab Bar 后）
+            // 外层 ZStack 保持 safe area 约束，按钮自然落在 Tab Bar 之上
             _ZoomScrollBridge(image: image) { text in
                 recognizedText = text
             }
+            .ignoresSafeArea()
 
             // 识别到文字后浮现的 AI 分析按钮
             if !recognizedText.isEmpty {
