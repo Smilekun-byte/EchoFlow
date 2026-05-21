@@ -325,7 +325,7 @@ extension _ZoomScrollBridge {
 
                         // 阶段 2：仅当 Live Text 确认含文字时才启 Vision OCR
                         // 避免对无文字图片做重复识别
-                        guard analysis.hasResults(for: ImageAnalyzer.Configuration([.text]))
+                        guard analysis.hasResults(for: .text)
                         else { return }
                     } catch {
                         print("⚠️ Live Text 分析失败: \(error.localizedDescription)")
